@@ -235,6 +235,7 @@ export function placeStatus(place, sessions) {
 	if (session) {
 		if (session.state === "Mapped") return { kind: "ok", label: "Syncing", live: true };
 		if (session.state === "Onboarding") return { kind: "warn", label: "Needs setup", live: true };
+		if (session.state === "Connecting") return { kind: "warn", label: "Connecting", live: true };
 		if (session.state === "Paused") return { kind: "", label: "Paused", live: true };
 		return { kind: "err", label: "Error", live: true, message: session.message };
 	}

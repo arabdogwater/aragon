@@ -4,7 +4,7 @@ import { Button, Switch, Thumb, Copyable, Icon } from "../ui.js";
 import { burst } from "../motion.js";
 
 /// Shown when Studio opens a place that has no project folder yet (or from "Map folder")
-export function Onboarding({ state, placeKey, onClose }) {
+export function Onboarding({ state, placeKey, onMapping, onClose }) {
 	const place = state.places.find((p) => p.key === placeKey);
 	const dialog = useRef(null);
 	const [busy, run] = useAction();
@@ -58,6 +58,8 @@ export function Onboarding({ state, placeKey, onClose }) {
 			const saved = await run("key", () => post("/api/account/key", { apiKey }));
 			if (!saved) return setMapping(false);
 		}
+
+		if (onMapping) onMapping();
 
 		try {
 			await post(`/api/places/${place.key}/map`, {

@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-26
+
+### Fixed
+
+- Finishing onboarding for a new place could leave the dashboard on "Studio is connecting right now" until Studio was manually disconnected and reconnected. Mapping now moves the Studio session out of setup right away, and the dialog always closes after its celebration
+- The Studio connector no longer misses a reconnect request that arrives while it's mid-hello, retries hellos that hang, and can't silently stop while its heartbeat keeps a stale session alive
+- The hub never waits on a terminal prompt (like "apply 20 000 changes from Studio?" during a big import, or the Wally install question) that nobody can answer
+
+### Added
+
+- The plugin's Connecting page shows what the first sync is doing (downloading, comparing, sending N changes), so big imports visibly make progress
+
 ## [1.0.0] - 2026-09-26
 
 First release of Aragon, built on Argon 2.0.29.
@@ -36,5 +48,6 @@ First release of Aragon, built on Argon 2.0.29.
 - VS Code extension integration. Aragon never needs an external editor
 - Plugin Settings, Help and Project widgets (everything moved to the dashboard)
 
-[Unreleased]: ../../compare/v1.0.0...HEAD
+[Unreleased]: ../../compare/v1.0.1...HEAD
+[1.0.1]: ../../compare/v1.0.0...v1.0.1
 [1.0.0]: ../../releases/tag/v1.0.0

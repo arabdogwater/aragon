@@ -79,6 +79,9 @@ pub enum SessionState {
 	Paused,
 	/// Project failed to load
 	Error,
+	/// Dashboard-only: the place was just mapped and Studio was asked to
+	/// reconnect, the connector's next hello replaces it (never sent to Studio)
+	Connecting,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -694,7 +697,10 @@ impl Hub {
 		let use_ts = config.ts_mode || (config.detect_project && project.is_ts());
 
 		if config.use_wally || (config.detect_project && project.is_wally()) {
-			integration::check_wally_packages(&workspace_dir);
+			// In the background: `wally install` can take a while and must never
+			// hold up Studio's hello (the file watcher picks the packages up)
+			let dir = workspace_dir.clone();
+			thread::spawn(move || integration::install_missing_wally_packages(&dir));
 		}
 
 		let mut children = Vec::new();
@@ -987,6 +993,15 @@ impl Hub {
 		}
 
 		lock!(self.dismissed).remove(key);
+
+		// Studio sessions waiting on this setup are no longer "needs setup", even
+		// before their connector says hello again; otherwise the dashboard keeps
+		// showing onboarding until then
+		for session in lock!(self.sessions).values_mut() {
+			if session.place_key == key && session.state == SessionState::Onboarding {
+				session.state = SessionState::Connecting;
+			}
+		}
 
 		self.reconnect(key, "Project mapping changed");
 		self.scan_place(key);

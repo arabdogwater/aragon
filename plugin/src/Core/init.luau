@@ -54,6 +54,7 @@ function Core.new(host: string?, port: number?, basePath: string?)
 	end
 	self.__ready = function(_project: Types.Project) end
 	self.__sync = function(_kind: Types.MessageKind, _data: any) end
+	self.__step = function(_text: string) end
 
 	self:__handleOpenInEditor(Config:get("OpenInEditor"))
 
@@ -88,6 +89,7 @@ function Core:run(initialSyncOverride: string?): Promise.Promise
 		local initialSyncPriority = initialSyncOverride or Config:get("InitialSyncPriority")
 
 		Log.trace("Fetching server details..")
+		self.__step("Fetching the project")
 
 		local project = self.client:fetchDetails():expect()
 		self.project = project
@@ -95,14 +97,17 @@ function Core:run(initialSyncOverride: string?): Promise.Promise
 		self:__verifyProject(project, true):expect()
 
 		Log.trace("Subscribing to the server queue..")
+		self.__step("Joining the sync")
 
 		self.client:subscribe():expect()
 
 		Log.trace("Getting initial snapshot..")
+		self.__step("Downloading the project files")
 
 		local snapshot = self.client:getSnapshot():expect()
 
 		Log.trace("Initializing processor..")
+		self.__step("Comparing Studio with your files")
 
 		local changes = self.processor:init(snapshot, initialSyncPriority)
 
@@ -121,7 +126,10 @@ function Core:run(initialSyncOverride: string?): Promise.Promise
 				self:__verifyChanges(changes, true):expect()
 				self.processor.write:applyChanges(changes, true)
 			elseif changes:total() > 0 then
+				self.__step(`Reading {changes:total()} changes from Studio`)
 				local reversed = self.processor:reverseChanges(changes)
+
+				self.__step(`Sending {changes:total()} changes to your PC`)
 				self.client:write(reversed):expect()
 			end
 		end
@@ -178,6 +186,15 @@ function Core:onReady(callback: (project: Types.Project) -> ())
 		end
 
 		return callback(project)
+	end
+end
+
+--- Progress while connecting, shown on the Connecting page
+function Core:onStep(callback: (text: string) -> ())
+	self.__step = function(text)
+		if self.status == Core.Status.Connecting then
+			callback(text)
+		end
 	end
 end
 

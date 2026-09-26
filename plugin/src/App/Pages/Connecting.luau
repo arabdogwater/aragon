@@ -14,9 +14,12 @@ local Container = require(Components.Container)
 local List = require(Components.List)
 
 local Children = Fusion.Children
+local Computed = Fusion.Computed
 
 type Props = {
 	App: { [string]: any },
+	-- What the first sync is doing right now
+	Step: Fusion.Value<string>?,
 }
 
 -- Place is mapped, the first sync is being prepared
@@ -26,7 +29,10 @@ return function(props: Props): { Instance }
 		StatusCard {
 			Title = "Fetching your code",
 			Status = "Connecting",
-			Body = `Sniffing out the project for {Place.Name}…`,
+			Body = Computed(function(use)
+				local step = props.Step and use(props.Step)
+				return if step then `{step}…` else `Sniffing out the project for {Place.Name}…`
+			end),
 			Color = Theme.Colors.Brand,
 			Pulse = true,
 			Mascot = Assets.Mascots.Search,

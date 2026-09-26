@@ -58,6 +58,11 @@ impl Dashboard {
 			);
 		}
 
+		// The hub has no terminal to ask questions in: every Argon prompt (e.g.
+		// "apply 20 000 changes from Studio?") takes its default answer instead of
+		// blocking a sync thread forever. Set before any hub thread starts
+		std::env::set_var("RUST_YES", "1");
+
 		let hub = Hub::new(port);
 		hub.start_background();
 

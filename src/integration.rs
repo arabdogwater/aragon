@@ -40,8 +40,8 @@ impl WallyManifest {
 	}
 }
 
-fn install_wally_packages(workspace_path: &Path) -> Result<()> {
-	let install = logger::prompt(
+fn install_wally_packages(workspace_path: &Path, interactive: bool) -> Result<()> {
+	let install = !interactive || logger::prompt(
         &format!("Looks like your project uses Wally but one of the directories is missing or one of the dependencies is not installed. Would you like to run {} now?",
             "wally install".bold()
         ),
@@ -62,6 +62,16 @@ fn install_wally_packages(workspace_path: &Path) -> Result<()> {
 }
 
 pub fn check_wally_packages(workspace_path: &Path) {
+	verify_wally_packages(workspace_path, true);
+}
+
+/// Installs missing Wally packages without asking (the hub has no terminal to
+/// prompt in, and a prompt there would block Studio's connection forever)
+pub fn install_missing_wally_packages(workspace_path: &Path) {
+	verify_wally_packages(workspace_path, false);
+}
+
+fn verify_wally_packages(workspace_path: &Path, interactive: bool) {
 	let manifest_path = workspace_path.join("wally.toml");
 
 	if !manifest_path.exists() {
@@ -77,7 +87,7 @@ pub fn check_wally_packages(workspace_path: &Path) {
 			let index_path = path.join("_Index");
 
 			if !path.exists() || !index_path.exists() {
-				return install_wally_packages(workspace_path);
+				return install_wally_packages(workspace_path, interactive);
 			}
 
 			for (short, long) in dependencies {
@@ -88,7 +98,7 @@ pub fn check_wally_packages(workspace_path: &Path) {
 				let long = Glob::from_path(&index_path.join(long + "*"))?;
 
 				if short.first().is_none() || long.first().is_none() {
-					return install_wally_packages(workspace_path);
+					return install_wally_packages(workspace_path, interactive);
 				}
 			}
 		}

@@ -67,10 +67,14 @@ local MIN_LAYOUT_WIDTH = 300
 
 -- How often to look for the hub while it isn't running
 local SEARCH_INTERVAL = 2
--- How often to re-check a place that waits for onboarding
-local RECHECK_INTERVAL = 10
+-- How often to re-check a place that waits for onboarding (cheap localhost call)
+local RECHECK_INTERVAL = 4
 -- Delay before retrying after a sync error
 local RETRY_INTERVAL = 5
+-- A hello that takes longer than this is treated as lost and retried
+local HELLO_TIMEOUT = 30
+-- The hub answers a poll within 20s, anything past this is a stuck request
+local POLL_TIMEOUT = 35
 -- Minimum time between sync activity reports sent to the dashboard
 local SYNC_REPORT_INTERVAL = 5
 
@@ -89,6 +93,9 @@ function App.new()
 	self.finishSync = nil
 	self.lastReport = 0
 	self.wake = Signal.new()
+	-- Set when something asked the connector to act while it wasn't sleeping,
+	-- so the request isn't lost (e.g. a Reconnect arriving mid-hello)
+	self.wakePending = false
 
 	self.connector = Connector.new(Config:get("Host"), Config:get("Port"), Config:get("Https"))
 
@@ -150,7 +157,7 @@ function App.new()
 		self.unloading = true
 		self:stopCore()
 		self.connector:bye()
-		self.wake:Fire()
+		self:wakeUp()
 	end)
 
 	toolbarButton:SetActive(peek(isOpen))
@@ -355,8 +362,21 @@ function App:setPage(page)
 	self.pages:set(pages)
 end
 
+--- Asks the connector loop to act now. Remembered if the loop is busy (e.g.
+--- waiting on a hello), so the next sleep returns right away instead of
+--- swallowing the request
+function App:wakeUp()
+	self.wakePending = true
+	self.wake:Fire()
+end
+
 --- Waits for `seconds` unless something wakes the connector up earlier
 function App:sleep(seconds: number)
+	if self.wakePending then
+		self.wakePending = false
+		return
+	end
+
 	local resumed = false
 	local thread = coroutine.running()
 
@@ -372,72 +392,101 @@ function App:sleep(seconds: number)
 
 	coroutine.yield()
 	connection:Unbind()
+
+	self.wakePending = false
 end
 
 --- The connector loop: find the hub, introduce this place, then either sync
---- or wait for the dashboard (onboarding / paused), forever
+--- or wait for the dashboard (onboarding / paused), forever. A step that errors
+--- is logged and retried, so the connector can never silently die while the
+--- heartbeat keeps a stale session alive in the dashboard
 function App:runConnector()
 	while not self.unloading do
-		if self.manualPause then
-			self.wake:Wait()
-			continue
-		end
-
-		local ok, response = self.connector:hello():await()
-
-		if self.unloading or self.manualPause then
-			continue
-		end
+		local ok, err = xpcall(function()
+			self:connectorStep()
+		end, debug.traceback)
 
 		if not ok then
-			self.hello:set(nil)
-			self:setIcon()
-			self:setStatus("Searching", Searching {
-				App = self,
-			})
+			Log.warn("Aragon connector hit an error, retrying:", err)
 
-			self:sleep(SEARCH_INTERVAL)
-			continue
-		end
-
-		Config:setHub(response.settings or {})
-		self.hello:set(response)
-		self:startPolling()
-
-		if response.state == "Mapped" then
-			local reason = self:sync(response)
-
-			if reason == "error" then
-				self:sleep(RETRY_INTERVAL)
-			elseif reason == "lost" then
-				self:sleep(SEARCH_INTERVAL)
-			end
-		elseif response.state == "Onboarding" then
-			self:setIcon("Warn")
-			self:setStatus("Onboarding", Onboarding {
-				App = self,
-			})
-
-			self:sleep(RECHECK_INTERVAL)
-		elseif response.state == "Paused" then
-			self:setIcon()
-			self:setStatus("Paused", Paused {
-				App = self,
-			})
-
-			self:sleep(RECHECK_INTERVAL * 3)
-		else
+			self:stopCore()
 			self:setIcon("Error")
 			self:setStatus(
 				"Error",
 				Error {
 					App = self,
-					Message = response.message or "The project for this place failed to load",
+					Message = "Something went wrong while connecting. Retrying…",
 				}
 			)
 
-			self:sleep(RETRY_INTERVAL * 2)
+			self:sleep(RETRY_INTERVAL)
 		end
+	end
+end
+
+function App:connectorStep()
+	if self.manualPause then
+		self:sleep(RECHECK_INTERVAL)
+		return
+	end
+
+	-- This hello answers any wake-up requested before it
+	self.wakePending = false
+
+	local ok, response = self.connector:hello():timeout(HELLO_TIMEOUT):await()
+
+	if self.unloading or self.manualPause then
+		return
+	end
+
+	if not ok then
+		self.hello:set(nil)
+		self:setIcon()
+		self:setStatus("Searching", Searching {
+			App = self,
+		})
+
+		self:sleep(SEARCH_INTERVAL)
+		return
+	end
+
+	Config:setHub(response.settings or {})
+	self.hello:set(response)
+	self:startPolling()
+
+	if response.state == "Mapped" then
+		local reason = self:sync(response)
+
+		if reason == "error" then
+			self:sleep(RETRY_INTERVAL)
+		elseif reason == "lost" then
+			self:sleep(SEARCH_INTERVAL)
+		end
+	elseif response.state == "Onboarding" then
+		self:setIcon("Warn")
+		self:setStatus("Onboarding", Onboarding {
+			App = self,
+		})
+
+		self:sleep(RECHECK_INTERVAL)
+	elseif response.state == "Paused" then
+		self:setIcon()
+		self:setStatus("Paused", Paused {
+			App = self,
+		})
+
+		self:sleep(RECHECK_INTERVAL * 3)
+	else
+		self:setIcon("Error")
+		self:setStatus(
+			"Error",
+			Error {
+				App = self,
+				Message = response.message or "The project for this place failed to load",
+			}
+		)
+
+		self:sleep(RETRY_INTERVAL * 2)
 	end
 end
 
@@ -450,22 +499,36 @@ function App:startPolling()
 	self.polling = true
 
 	task.spawn(function()
+		local failures = 0
+
 		while not self.unloading do
-			local ok, controls = self.connector:poll():await()
+			local ok, controls = self.connector:poll():timeout(POLL_TIMEOUT):await()
 
-			if not ok then
-				-- Hub restarted or closed, the connector loop says hello again
-				self.polling = false
+			if ok then
+				failures = 0
 
-				if not self.core then
-					self.wake:Fire()
+				for _, control in controls or {} do
+					local handled, err = pcall(self.handleControl, self, control)
+
+					if not handled then
+						Log.warn("Failed to handle a hub control:", err)
+					end
 				end
-
+			elseif not self.core then
+				-- Hub restarted or closed: the connector loop says hello again
+				-- (and starts polling again once the hub answers)
+				self.polling = false
+				self:wakeUp()
 				return
-			end
+			else
+				-- Still syncing: keep the heartbeat alive and re-introduce this
+				-- session in case the hub forgot it, instead of going quiet
+				failures += 1
+				task.wait(math.min(failures, 5))
 
-			for _, control in controls or {} do
-				self:handleControl(control)
+				if not self.unloading and self.core then
+					self.connector:hello():timeout(HELLO_TIMEOUT):await()
+				end
 			end
 		end
 
@@ -496,7 +559,7 @@ function App:restart()
 		self.finishSync("restart")
 	end
 
-	self.wake:Fire()
+	self:wakeUp()
 end
 
 function App:stopCore()
@@ -528,10 +591,17 @@ function App:sync(response: Connector.HelloResponse): string
 	local core = Core.new(Config:get("Host"), Config:get("Port"), response.base)
 	self.core = core
 
+	local step = Value("Fetching the project")
+
+	core:onStep(function(text)
+		step:set(text)
+	end)
+
 	task.delay(0.25, function()
 		if not finished and core.status == Core.Status.Connecting and peek(self.status) ~= "Prompt" then
 			self:setStatus("Connecting", Connecting {
 				App = self,
+				Step = step,
 			})
 		end
 	end)
@@ -686,7 +756,7 @@ function App:connect()
 		App = self,
 	})
 
-	self.wake:Fire()
+	self:wakeUp()
 end
 
 function App:openDashboard()

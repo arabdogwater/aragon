@@ -110,15 +110,30 @@ function App() {
 		document.title = pending ? `(${pending}) Aragon` : "Aragon";
 	}, [state && state.onboarding.length]);
 
+	// The dialog being submitted stays open for its celebration, even though the hub
+	// drops the place from `onboarding` the moment it's mapped
+	const [pinnedKey, setPinnedKey] = useState(null);
 	let onboardingKey = null;
 
 	if (state) {
 		if (route.name === "setup") onboardingKey = route.params[0];
-		else onboardingKey = state.onboarding.find((key) => !dismissed.has(key)) || null;
+		else onboardingKey = pinnedKey || state.onboarding.find((key) => !dismissed.has(key)) || null;
 	}
 
+	// Keys closed here stay hidden until the hub stops listing them (mapping moves the
+	// session out of onboarding right away, this also covers a Studio that is slow to
+	// say hello again), then they're forgotten so a later unmap can ask again
+	useEffect(() => {
+		if (!state || !dismissed.size) return;
+		const pending = new Set(state.onboarding);
+		const stale = [...dismissed].filter((key) => !pending.has(key));
+		if (stale.length) setDismissed(new Set([...dismissed].filter((key) => pending.has(key))));
+	}, [state && state.onboarding.join(",")]);
+
 	const closeOnboarding = (dismiss, next) => {
-		if (onboardingKey && dismiss) setDismissed(new Set([...dismissed, onboardingKey]));
+		// Done or dismissed, the dialog closes now either way
+		if (onboardingKey) setDismissed(new Set([...dismissed, onboardingKey]));
+		setPinnedKey(null);
 
 		if (next) go(next);
 		else if (route.name === "setup") history.length > 1 ? history.back() : go("#/");
@@ -141,7 +156,7 @@ function App() {
 		${state && !state.prefs.welcomed && !welcomeDone
 			? html`<${Welcome} state=${state} onFinish=${() => setWelcomeDone(true)} />`
 			: null}
-		${onboardingKey && (state.prefs.welcomed || welcomeDone) ? html`<${Onboarding} key=${onboardingKey} state=${state} placeKey=${onboardingKey} onClose=${closeOnboarding} />` : null}
+		${onboardingKey && (state.prefs.welcomed || welcomeDone) ? html`<${Onboarding} key=${onboardingKey} state=${state} placeKey=${onboardingKey} onMapping=${() => setPinnedKey(onboardingKey)} onClose=${closeOnboarding} />` : null}
 		<${Toasts} />
 	</div>`;
 }

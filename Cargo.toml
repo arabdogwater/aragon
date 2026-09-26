@@ -6,7 +6,7 @@ repository = "https://github.com/arabdogwater/aragon"
 documentation = "https://github.com/arabdogwater/aragon#readme"
 homepage = "https://github.com/arabdogwater/aragon"
 license = "Apache-2.0"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 build = "build.rs"
 
