@@ -1,15 +1,13 @@
 use anyhow::Result;
 use colored::Colorize;
 use include_dir::{include_dir, Dir};
-use log::trace;
 use rbx_dom_weak::{types::Variant, ustr};
-use self_update::{backends::github::Update, self_replace, update::UpdateStatus};
 use std::{env, fs, path::Path};
 
 use crate::{
-	argon_error, argon_info,
+	aragon_error, aragon_info,
 	ext::PathExt,
-	logger, updater,
+	updater,
 	util::{self, get_plugin_path},
 };
 
@@ -20,7 +18,7 @@ const MODEL_TEMPLATE: Dir = include_dir!("$CARGO_MANIFEST_DIR/assets/templates/m
 const QUICK_TEMPLATE: Dir = include_dir!("$CARGO_MANIFEST_DIR/assets/templates/quick");
 const EMPTY_TEMPLATE: Dir = include_dir!("$CARGO_MANIFEST_DIR/assets/templates/empty");
 
-const ARGON_PLUGIN: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/Argon.rbxm"));
+const ARAGON_PLUGIN: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/Aragon.rbxm"));
 
 pub fn is_managed() -> bool {
 	let path = match env::current_exe() {
@@ -28,12 +26,15 @@ pub fn is_managed() -> bool {
 		Err(_) => return false,
 	};
 
-	!path.contains(&[".argon", "bin"]) && (path.contains(&["bin"]) || path.contains(&["tool-storage"]))
+	// Dev builds (cargo target dir) never install themselves
+	let is_dev = path.contains(&["target", "debug"]) || path.contains(&["target", "release"]);
+
+	is_dev || (!path.contains(&[".aragon", "bin"]) && (path.contains(&["bin"]) || path.contains(&["tool-storage"])))
 }
 
 pub fn verify(is_managed: bool, with_plugin: bool) -> Result<()> {
 	if !is_managed {
-		let bin_dir = util::get_argon_dir()?.join("bin");
+		let bin_dir = util::get_aragon_dir()?.join("bin");
 
 		if !bin_dir.exists() {
 			fs::create_dir_all(&bin_dir)?;
@@ -42,17 +43,15 @@ pub fn verify(is_managed: bool, with_plugin: bool) -> Result<()> {
 		globenv::set_path(&bin_dir.to_string())?;
 
 		#[cfg(not(target_os = "windows"))]
-		let exe_path = bin_dir.join("argon");
+		let exe_path = bin_dir.join("aragon");
 
 		#[cfg(target_os = "windows")]
-		let exe_path = bin_dir.join("argon.exe");
+		let exe_path = bin_dir.join("aragon.exe");
 
+		// Keep a copy on PATH so `aragon` works from any terminal. Never prompt
+		// here: a double-clicked dashboard has no console to answer in
 		if !exe_path.exists() {
 			fs::copy(env::current_exe()?, &exe_path)?;
-
-			if logger::prompt("Installation completed! Do you want to remove this executable?", true) {
-				self_replace::self_delete()?;
-			}
 		}
 	}
 
@@ -69,55 +68,33 @@ pub fn verify(is_managed: bool, with_plugin: bool) -> Result<()> {
 	Ok(())
 }
 
-pub fn install_plugin(path: &Path, show_progress: bool) -> Result<()> {
+pub fn install_plugin(path: &Path, _show_progress: bool) -> Result<()> {
 	fs::create_dir_all(path.get_parent())?;
 
-	let style = util::get_progress_style();
-
-	let update = Update::configure()
-		.repo_owner("argon-rbx")
-		.repo_name("argon-roblox")
-		.bin_name("Argon.rbxm")
-		.target("")
-		.show_download_progress(show_progress)
-		.set_progress_style(style.0, style.1)
-		.bin_install_path(path)
-		.build()?;
-
-	match update.download() {
-		Ok(status) => match status {
-			UpdateStatus::Updated(release) => {
-				argon_info!("Installed Argon plugin, version: {}", release.version.bold());
-
-				if path.contains(&["Roblox", "Plugins"]) {
-					let mut status = updater::get_status()?;
-					status.plugin_version = release.version;
-
-					updater::set_status(&status)?;
-				}
-			}
-			_ => unreachable!(),
-		},
-		Err(err) => {
-			trace!("Failed to install Argon plugin from GitHub: {err}");
-
-			#[allow(clippy::const_is_empty)]
-			if ARGON_PLUGIN.is_empty() {
-				argon_error!("No internet connection! Failed to install Argon plugin - no bundled binary found");
-				return Ok(());
-			}
-
-			fs::write(path, ARGON_PLUGIN)?;
-
-			argon_info!("No internet connection! Installed Argon plugin from bundled binary")
-		}
+	#[allow(clippy::const_is_empty)]
+	if ARAGON_PLUGIN.is_empty() {
+		aragon_error!("This Aragon build has no bundled Studio plugin! Build it with Rojo (see README)");
+		return Ok(());
 	}
+
+	fs::write(path, ARAGON_PLUGIN)?;
+
+	let version = get_plugin_version();
+
+	if path.contains(&["Roblox", "Plugins"]) {
+		let mut status = updater::get_status()?;
+		status.plugin_version = version.clone();
+
+		updater::set_status(&status)?;
+	}
+
+	aragon_info!("Installed Aragon plugin, version: {}", version.bold());
 
 	Ok(())
 }
 
 pub fn install_templates(update: bool) -> Result<()> {
-	let templates_dir = util::get_argon_dir()?.join("templates");
+	let templates_dir = util::get_aragon_dir()?.join("templates");
 
 	let place_template = templates_dir.join("place");
 	let plugin_template = templates_dir.join("plugin");
@@ -177,12 +154,23 @@ fn install_template(template: &Dir, path: &Path) -> Result<()> {
 pub fn get_plugin_version() -> String {
 	// May seem hacky, but this function will only be
 	// called once for most users and is non-critical anyway
-	if let Ok(dom) = rbx_binary::from_reader(ARGON_PLUGIN) {
+	if let Ok(dom) = rbx_binary::from_reader(ARAGON_PLUGIN) {
 		for (_, instance) in dom.into_raw().1 {
 			if instance.name == "manifest" && instance.class == "ModuleScript" {
 				if let Some(Variant::String(source)) = instance.properties.get(&ustr("Source")) {
-					let source = &source[source.find(r#"["version"] = ""#).unwrap_or(0) + 15..];
-					return source[..source.find(r#"","#).unwrap_or(6)].to_owned();
+					// Rojo/Argon turn wally.toml into a Luau table, key style varies
+					// (`version = "x"` or `["version"] = "x"`), so find the value loosely
+					for (index, _) in source.match_indices("version") {
+						let rest = source[index + 7..].trim_start_matches(['"', ']', ' ']);
+
+						if let Some(rest) = rest.strip_prefix('=') {
+							let rest = rest.trim_start();
+
+							if let Some(value) = rest.strip_prefix('"').and_then(|v| v.split('"').next()) {
+								return value.to_owned();
+							}
+						}
+					}
 				}
 			}
 		}

@@ -1,0 +1,34 @@
+{
+  "Aragon": {
+    "Banner": "rbxassetid://80137995837611",
+    "Logo": "rbxassetid://90184466943372",
+    "LogoOk": "rbxassetid://76882622375863",
+    "LogoWarn": "rbxassetid://129004052625194",
+    "LogoError": "rbxassetid://125223019950199"
+  },
+  "Scenery": {
+    "Town": "rbxassetid://122445169586095",
+    "CloudA": "rbxassetid://99434925377081",
+    "CloudB": "rbxassetid://116130275151964",
+    "BeeRight": "rbxassetid://120218440644554",
+    "BeeLeft": "rbxassetid://105661472737201"
+  },
+  "Mascots": {
+    "Sleepy": "rbxassetid://95280654755854",
+    "Setup": "rbxassetid://111765818986626",
+    "Syncing": "rbxassetid://126257308851834",
+    "Search": "rbxassetid://117963399935822",
+    "Fix": "rbxassetid://138992087573186",
+    "Wave": "rbxassetid://117759391706048"
+  },
+  "Icons": {
+    "Settings": "rbxassetid://16549970121",
+    "Checkmark": "rbxassetid://16528403189",
+    "Spinner": "rbxassetid://16548972586",
+    "Info": "rbxassetid://16549936110",
+    "Help": "rbxassetid://16549970317",
+    "Dropdown": "rbxassetid://16698223846",
+    "Expand": "rbxassetid://82247774782797",
+    "External": "rbxassetid://116551774518863"
+  }
+}

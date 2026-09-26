@@ -1,4 +1,5 @@
 #![allow(clippy::new_without_default)]
+#![recursion_limit = "256"]
 
 use rbx_dom_weak::{types::Variant, UstrMap};
 
@@ -9,6 +10,7 @@ pub mod core;
 pub mod crash_handler;
 pub mod ext;
 pub mod glob;
+pub mod hub;
 pub mod installer;
 pub mod integration;
 pub mod logger;

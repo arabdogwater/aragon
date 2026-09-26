@@ -9,27 +9,27 @@ use std::{fmt, io::Write};
 
 use crate::util;
 
-// These Argon logs ignore verbosity level, aside of `Off`
+// These Aragon logs ignore verbosity level, aside of `Off`
 #[macro_export]
-macro_rules! argon_error {
-    ($($arg:tt)+) => (log::log!(target: "argon_log", log::Level::Error, $($arg)+))
+macro_rules! aragon_error {
+    ($($arg:tt)+) => (log::log!(target: "aragon_log", log::Level::Error, $($arg)+))
 }
 
 #[macro_export]
-macro_rules! argon_warn {
-    ($($arg:tt)+) => (log::log!(target: "argon_log", log::Level::Warn, $($arg)+))
+macro_rules! aragon_warn {
+    ($($arg:tt)+) => (log::log!(target: "aragon_log", log::Level::Warn, $($arg)+))
 }
 
 #[macro_export]
-macro_rules! argon_info {
-    ($($arg:tt)+) => (log::log!(target: "argon_log", log::Level::Info, $($arg)+))
+macro_rules! aragon_info {
+    ($($arg:tt)+) => (log::log!(target: "aragon_log", log::Level::Info, $($arg)+))
 }
 
 pub fn init(verbosity: LevelFilter, log_style: WriteStyle) {
 	let mut builder = Builder::new();
 
 	builder.format(move |buffer, record| {
-		if record.level() > verbosity && record.target() != "argon_log" {
+		if record.level() > verbosity && record.target() != "aragon_log" {
 			return Ok(());
 		}
 
@@ -41,7 +41,7 @@ pub fn init(verbosity: LevelFilter, log_style: WriteStyle) {
 			Level::Trace => Color::White,
 		};
 
-		if record.target() == "argon_log" {
+		if record.target() == "aragon_log" {
 			writeln!(
 				buffer,
 				"{}: {:?}",
@@ -174,7 +174,7 @@ pub struct PromptTheme {
 impl Theme for PromptTheme {
 	fn format_confirm_prompt(&self, f: &mut dyn fmt::Write, prompt: &str, _: Option<bool>) -> fmt::Result {
 		if !prompt.is_empty() {
-			write!(f, "{}: {} ", &self.prompt_prefix, self.prompt_style.apply_to(prompt))?;
+			write!(f, "{}: {} ", self.prompt_prefix, self.prompt_style.apply_to(prompt))?;
 		}
 
 		write!(f, "{}", self.hint_style.apply_to("(y/n)"))
@@ -187,19 +187,19 @@ impl Theme for PromptTheme {
 		selection: Option<bool>,
 	) -> fmt::Result {
 		if !prompt.is_empty() {
-			write!(f, "{}: {} ", &self.prompt_prefix, self.prompt_style.apply_to(prompt))?;
+			write!(f, "{}: {} ", self.prompt_prefix, self.prompt_style.apply_to(prompt))?;
 		}
 
 		let selection = selection.map(|s| if s { "yes" } else { "no" });
 
 		match selection {
 			Some(selection) => match selection {
-				"yes" => write!(f, "{} {}", &self.prompt_suffix, self.yes_style.apply_to(selection)),
-				"no" => write!(f, "{} {}", &self.prompt_suffix, self.no_style.apply_to(selection)),
-				_ => write!(f, "{} {}", &self.prompt_suffix, self.none_style.apply_to(selection)),
+				"yes" => write!(f, "{} {}", self.prompt_suffix, self.yes_style.apply_to(selection)),
+				"no" => write!(f, "{} {}", self.prompt_suffix, self.no_style.apply_to(selection)),
+				_ => write!(f, "{} {}", self.prompt_suffix, self.none_style.apply_to(selection)),
 			},
 			None => {
-				write!(f, "{} {}", &self.prompt_suffix, self.none_style.apply_to("none"))
+				write!(f, "{} {}", self.prompt_suffix, self.none_style.apply_to("none"))
 			}
 		}
 	}

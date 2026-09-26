@@ -1,12 +1,11 @@
 use actix_msgpack::{MsgPack, MsgPackResponseBuilder};
-use actix_web::{post, web::Data, HttpResponse, Responder};
+use actix_web::{post, web, HttpResponse, Responder};
 use log::trace;
-use std::sync::Arc;
 
-use crate::{core::Core, server::AuthRequest};
+use crate::server::{AuthRequest, CoreRef};
 
 #[post("/read")]
-async fn main(request: MsgPack<AuthRequest>, core: Data<Arc<Core>>) -> impl Responder {
+async fn main(request: MsgPack<AuthRequest>, core: CoreRef) -> impl Responder {
 	trace!("Received request: read");
 
 	let id = request.client_id;
@@ -16,8 +15,11 @@ async fn main(request: MsgPack<AuthRequest>, core: Data<Arc<Core>>) -> impl Resp
 		return HttpResponse::Unauthorized().body("Not subscribed");
 	}
 
-	match queue.get_timeout(id) {
-		Ok(message) => HttpResponse::Ok().msgpack(message),
+	// Long-poll on the blocking pool so many Studio sessions can
+	// wait at once without starving the actix workers
+	match web::block(move || queue.get_timeout(id)).await {
+		Ok(Ok(message)) => HttpResponse::Ok().msgpack(message),
+		Ok(Err(err)) => HttpResponse::InternalServerError().body(err.to_string()),
 		Err(err) => HttpResponse::InternalServerError().body(err.to_string()),
 	}
 }

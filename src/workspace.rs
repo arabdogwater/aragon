@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-	argon_info, argon_warn,
+	aragon_info, aragon_warn,
 	config::Config,
 	ext::PathExt,
 	program::{Program, ProgramName},
@@ -36,7 +36,7 @@ pub struct WorkspaceConfig<'a> {
 }
 
 pub fn init(workspace: WorkspaceConfig) -> Result<()> {
-	let template_dir = util::get_argon_dir()?.join("templates").join(workspace.template);
+	let template_dir = util::get_aragon_dir()?.join("templates").join(workspace.template);
 
 	if !template_dir.exists() {
 		bail!("Template {} does not exist", workspace.template.bold())
@@ -147,7 +147,7 @@ pub fn init(workspace: WorkspaceConfig) -> Result<()> {
 pub fn init_ts(workspace: WorkspaceConfig) -> Result<Option<PathBuf>> {
 	let package_manager = &Config::new().package_manager;
 
-	argon_info!("Waiting for {}..", package_manager.bold());
+	aragon_info!("Waiting for {}..", package_manager.bold());
 
 	let template = workspace.template;
 	let mut project = workspace.project.to_owned();
@@ -198,10 +198,10 @@ pub fn init_ts(workspace: WorkspaceConfig) -> Result<Option<PathBuf>> {
 		return Ok(None);
 	}
 
-	let template_dir = util::get_argon_dir()?.join("templates").join(template);
+	let template_dir = util::get_aragon_dir()?.join("templates").join(template);
 
 	if !template_dir.exists() {
-		argon_warn!(
+		aragon_warn!(
 			"Template {} does not exist, additional files won't be added!",
 			template.bold()
 		);
@@ -267,7 +267,7 @@ fn add_license(path: &Path, license: &str, fallback: &str) -> Result<()> {
 	let url = format!("https://api.github.com/licenses/{license}");
 
 	let license_template = || -> Result<String> {
-		match Client::new().get(url).header(USER_AGENT, "Argon").send() {
+		match Client::new().get(url).header(USER_AGENT, "Aragon").send() {
 			Ok(response) => {
 				let json = response.json::<serde_json::Value>()?;
 
@@ -309,7 +309,7 @@ fn add_license(path: &Path, license: &str, fallback: &str) -> Result<()> {
 
 			fs::write(path, license)?;
 
-			argon_warn!("Failed to add license: {}. Using basic fallback instead!", err);
+			aragon_warn!("Failed to add license: {}. Using basic fallback instead!", err);
 
 			return Ok(());
 		}

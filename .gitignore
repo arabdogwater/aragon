@@ -5,3 +5,13 @@
 *.rbxmx
 *.rbxl
 *.rbxlx
+
+# Local AI assistant files, never published
+.claude/
+**/.claude/
+CLAUDE.md
+CLAUDE.local.md
+general_instructions.md
+
+# Release packaging
+/dist

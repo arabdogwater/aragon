@@ -26,7 +26,11 @@ pub mod queue;
 pub mod snapshot;
 pub mod tree;
 
+/// Handles "open this file" requests from Studio (`OpenInEditor` setting)
+pub type Opener = Arc<dyn Fn(&Path) + Send + Sync>;
+
 pub struct Core {
+	opener: Mutex<Option<Opener>>,
 	project: Arc<Mutex<Project>>,
 	tree: Arc<Mutex<Tree>>,
 	queue: Arc<Queue>,
@@ -72,6 +76,7 @@ impl Core {
 		trace!("Core initialized successfully!");
 
 		Ok(Core {
+			opener: Mutex::new(None),
 			project,
 			tree,
 			queue,
@@ -227,6 +232,11 @@ impl Core {
 		Ok(())
 	}
 
+	/// Replaces the OS default app with a custom opener (the dashboard editor)
+	pub fn set_opener(&self, opener: Opener) {
+		*lock!(self.opener) = Some(opener);
+	}
+
 	pub fn open(&self, instance: Ref) -> Result<()> {
 		let tree = self.tree();
 
@@ -239,7 +249,13 @@ impl Core {
 		sources.sort_by_key(|source| source.index());
 
 		if let Some(source) = sources.first() {
-			open::that(source.path())?;
+			let opener = lock!(self.opener).clone();
+
+			match opener {
+				Some(opener) => opener(source.path()),
+				None => open::that(source.path())?,
+			}
+
 			Ok(())
 		} else {
 			bail!("No matching file was found")

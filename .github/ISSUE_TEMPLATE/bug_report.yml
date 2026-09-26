@@ -1,0 +1,39 @@
+name: 🐛 Bug report
+description: Something in Aragon doesn't work the way it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping make Aragon better! Much appreciated. Very helpful.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a place in Studio
+        2. ...
+  - type: input
+    id: version
+    attributes:
+      label: Aragon version
+      description: Shown in Settings → About, or run `aragon --version`
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Run `aragon dashboard -vv` from a terminal to get detailed logs.
+      render: shell

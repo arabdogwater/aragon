@@ -10,7 +10,7 @@ use std::{
 
 use super::{changes::Changes, queue::Queue, tree::Tree};
 use crate::{
-	argon_error,
+	aragon_error,
 	config::Config,
 	constants::BLACKLISTED_PATHS,
 	lock, logger,
@@ -167,7 +167,7 @@ impl Handler {
 					Err(err) => error!("Failed to reload project: {err}"),
 				}
 			} else if let VfsEvent::Delete(_) = event {
-				argon_error!("Warning! Top level project file was deleted. This might cause unexpected behavior. Skipping processing of changes!");
+				aragon_error!("Warning! Top level project file was deleted. This might cause unexpected behavior. Skipping processing of changes!");
 			}
 		}
 	}

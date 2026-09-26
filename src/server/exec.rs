@@ -1,10 +1,12 @@
 use actix_msgpack::MsgPack;
-use actix_web::{post, web::Data, HttpResponse, Responder};
+use actix_web::{post, HttpResponse, Responder};
 use log::{error, trace};
 use serde::Deserialize;
-use std::sync::Arc;
 
-use crate::{core::Core, server, studio};
+use crate::{
+	server::{self, CoreRef},
+	studio,
+};
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -14,7 +16,7 @@ struct Request {
 }
 
 #[post("/exec")]
-async fn main(request: MsgPack<Request>, core: Data<Arc<Core>>) -> impl Responder {
+async fn main(request: MsgPack<Request>, core: CoreRef) -> impl Responder {
 	trace!("Received request: exec");
 
 	let queue = core.queue();

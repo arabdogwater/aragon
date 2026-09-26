@@ -1,21 +1,21 @@
 [package]
-name = "argon-rbx"
-authors = ["Dervex"]
-description = "Full featured tool for Roblox development"
-repository = "https://github.com/argon-rbx/argon"
-documentation = "https://argon.wiki/docs"
-homepage = "https://argon.wiki"
+name = "aragon"
+authors = ["Dervex (Argon)", "Aragon contributors"]
+description = "Doge-powered Roblox sync hub with a native dashboard (built on Argon)"
+repository = "https://github.com/arabdogwater/aragon"
+documentation = "https://github.com/arabdogwater/aragon#readme"
+homepage = "https://github.com/arabdogwater/aragon"
 license = "Apache-2.0"
-version = "2.0.29"
+version = "1.0.0"
 edition = "2021"
 build = "build.rs"
 
 [[bin]]
-name = "argon"
+name = "aragon"
 path = "src/main.rs"
 
 [lib]
-name = "argon"
+name = "aragon"
 path = "src/lib.rs"
 
 [features]
@@ -88,14 +88,26 @@ open = "5.3.3"
 log = "0.4.29"
 csv = "1.4.0"
 
+# Aragon hub + native dashboard
+wry = "0.57"
+tao = "0.37"
+keyring = { version = "3.6", features = ["windows-native", "apple-native", "sync-secret-service"] }
+rfd = "0.17"
+tray-icon = "0.25"
+
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 keybd_event = "0.1.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winsafe = { version = "0.0.26", features = ["user"] }
+windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_UI_WindowsAndMessaging"] }
+# Same versions wry uses, for the WebView2 memory target API
+webview2-com = "0.39.1"
+windows-core = "0.62"
 
 [build-dependencies]
 anyhow = "1.0.102"
+embed-resource = "3.0"
 self_update = { version = "0.39.0", default-features = false, features = [
 	"rustls",
 ] }

@@ -4,7 +4,7 @@ use crossbeam_channel::{Receiver, Sender};
 use std::{collections::HashMap, sync::RwLock};
 
 use crate::{
-	argon_warn,
+	aragon_warn,
 	config::Config,
 	constants::QUEUE_TIMEOUT,
 	server::{self, Message},
@@ -87,7 +87,7 @@ impl Queue {
 			*unsynced_changes += 1;
 
 			if max_unsynced_changes > 0 && *unsynced_changes >= max_unsynced_changes {
-				argon_warn!(
+				aragon_warn!(
 					"There are {} unsynced changes. Connect at least one client to this server or increase max_unsynced_changes setting to suppress this warning",
 					unsynced_changes.to_string().bold()
 				);
@@ -212,6 +212,28 @@ impl Queue {
 		)?;
 
 		Ok(())
+	}
+
+	/// Asks every connected Studio client to disconnect (used by the hub
+	/// when a place gets remapped, paused or unloaded)
+	pub fn disconnect_all(&self, message: &str) {
+		let ids: Vec<u32> = read!(self.listeners)
+			.iter()
+			.filter(|listener| !listener.is_internal)
+			.map(|listener| listener.id)
+			.collect();
+
+		for id in ids {
+			self.disconnect(message, id).ok();
+		}
+	}
+
+	/// Number of real (non-internal) clients listening to this queue
+	pub fn client_count(&self) -> usize {
+		read!(self.listeners)
+			.iter()
+			.filter(|listener| !listener.is_internal)
+			.count()
 	}
 
 	pub fn is_subscribed(&self, id: u32) -> bool {

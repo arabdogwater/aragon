@@ -1,0 +1,18 @@
+Aragon
+Copyright 2026 Aragon contributors
+
+This product is a derivative of Argon (https://github.com/argon-rbx/argon and
+https://github.com/argon-rbx/argon-roblox), Copyright Dervex, licensed under
+the Apache License, Version 2.0.
+
+Changes from Argon include: a multi-place hub server with per-place sync cores,
+a native dashboard (tray app + WebView2 window), automatic place resolution via
+Roblox APIs, per-place folder mapping and onboarding, code analytics, a
+connect-only Studio plugin, and new Aragon branding and artwork.
+
+Third-party Luau packages bundled into the Studio plugin (Fusion, AdvancedSignal,
+typed-promise, Highlighter) and the vendored Preact/htm and Monaco (loaded from a
+CDN) used by the dashboard remain under their own licenses.
+
+Aragon is not affiliated with, endorsed by, or sponsored by Roblox Corporation.
+"Roblox" and "Roblox Studio" are trademarks of Roblox Corporation.

@@ -12,11 +12,15 @@ use std::{env, path::PathBuf, process::Command};
 
 use crate::{ext::ResultExt, Properties};
 
-/// Returns the `.argon` directory
-pub fn get_argon_dir() -> Result<PathBuf> {
+/// Returns the `.aragon` directory (`ARAGON_HOME` overrides it, e.g. for a demo profile)
+pub fn get_aragon_dir() -> Result<PathBuf> {
+	if let Some(home) = env::var_os("ARAGON_HOME") {
+		return Ok(PathBuf::from(home));
+	}
+
 	let user_dirs = UserDirs::new().context("Failed to get user directory")?;
 
-	Ok(user_dirs.home_dir().join(".argon"))
+	Ok(user_dirs.home_dir().join(".aragon"))
 }
 
 /// Returns the Git or local username of the current user
@@ -33,7 +37,7 @@ pub fn get_username() -> String {
 }
 
 pub fn get_plugin_path() -> Result<PathBuf> {
-	Ok(RobloxStudio::locate()?.plugins_path().join("Argon.rbxm"))
+	Ok(RobloxStudio::locate()?.plugins_path().join("Aragon.rbxm"))
 }
 
 /// Checks if the given `class` is a service
@@ -93,7 +97,7 @@ pub fn process_exists(pid: u32) -> bool {
 			.output();
 
 		if let Ok(output) = output {
-			String::from_utf8_lossy(&output.stdout).contains("argon.exe")
+			String::from_utf8_lossy(&output.stdout).contains("aragon.exe")
 		} else {
 			false
 		}

@@ -5,7 +5,7 @@ use log::{debug, info};
 use std::{path::PathBuf, process, sync::Arc, thread};
 
 use crate::{
-	argon_error, argon_info, argon_warn,
+	aragon_error, aragon_info, aragon_warn,
 	config::Config,
 	core::Core,
 	ext::PathExt,
@@ -43,13 +43,13 @@ pub struct Serve {
 	#[arg(short, long)]
 	ts: bool,
 
-	/// Run Argon asynchronously
+	/// Run Aragon asynchronously
 	#[arg(short = 'A', long = "async")]
 	run_async: bool,
 
-	/// Spawn the Argon child process (internal)
+	/// Spawn the Aragon child process (internal)
 	#[arg(long, hide = true)]
-	argon_spawn: bool,
+	aragon_spawn: bool,
 }
 
 impl Serve {
@@ -59,7 +59,7 @@ impl Serve {
 		Config::load_workspace(project_path.get_parent());
 		let config = Config::new();
 
-		if !self.argon_spawn && (self.run_async || config.run_async) {
+		if !self.aragon_spawn && (self.run_async || config.run_async) {
 			return self.spawn();
 		}
 
@@ -73,7 +73,7 @@ impl Serve {
 			bail!(
 				"No project files found in {}. Run {} to create new one",
 				project_path.get_parent().to_string().bold(),
-				"argon init".bold(),
+				"aragon init".bold(),
 			);
 		}
 
@@ -115,7 +115,7 @@ impl Serve {
 			if config.scan_ports {
 				let new_port = server::get_free_port(&host, port);
 
-				argon_warn!(
+				aragon_warn!(
 					"Port {} is already in use, using {} instead!",
 					port.to_string().bold(),
 					new_port.to_string().bold()
@@ -140,7 +140,7 @@ impl Serve {
 			queue.subscribe_internal().unwrap();
 			core.sourcemap(Some(path.clone()), false)?;
 
-			argon_info!("Generated sourcemap at: {}", path.to_string().bold());
+			aragon_info!("Generated sourcemap at: {}", path.to_string().bold());
 
 			thread::spawn(move || loop {
 				let _message = queue.get_change(0).unwrap();
@@ -150,7 +150,7 @@ impl Serve {
 				match core.sourcemap(Some(path.clone()), false) {
 					Ok(()) => (),
 					Err(err) => {
-						argon_error!("Failed to regenerate sourcemap: {}", err);
+						aragon_error!("Failed to regenerate sourcemap: {}", err);
 					}
 				}
 			});
@@ -166,7 +166,7 @@ impl Serve {
 
 		let server = Server::new(core, &host, port);
 
-		argon_info!(
+		aragon_info!(
 			"Serving on: {}, project: {}",
 			server::format_address(&host, port).bold(),
 			project_path.to_string().bold()
@@ -206,7 +206,7 @@ impl Serve {
 			args.push("--ts".into());
 		}
 
-		Program::new(ProgramName::Argon).args(args).spawn()?;
+		Program::new(ProgramName::Aragon).args(args).spawn()?;
 
 		Ok(())
 	}

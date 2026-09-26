@@ -1,0 +1,28 @@
+// Windows resources for aragon.exe: app icon + version info
+1 ICON "branding/aragon.ico"
+
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+	BLOCK "StringFileInfo"
+	BEGIN
+		BLOCK "040904B0"
+		BEGIN
+			VALUE "CompanyName", "Aragon"
+			VALUE "FileDescription", "Aragon - Roblox sync hub"
+			VALUE "FileVersion", "1.0.0"
+			VALUE "InternalName", "aragon"
+			VALUE "OriginalFilename", "aragon.exe"
+			VALUE "ProductName", "Aragon"
+			VALUE "ProductVersion", "1.0.0"
+			VALUE "LegalCopyright", "Apache-2.0, built on Argon by Dervex"
+		END
+	END
+	BLOCK "VarFileInfo"
+	BEGIN
+		VALUE "Translation", 0x409, 1200
+	END
+END

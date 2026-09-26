@@ -11,9 +11,9 @@ use std::{
 };
 
 use crate::{
-	argon_error, argon_info,
+	aragon_error, aragon_info,
 	constants::TEMPLATES_VERSION,
-	installer::{get_plugin_version, install_templates},
+	installer::{get_plugin_version, install_plugin, install_templates},
 	logger,
 	util::{self, get_plugin_path},
 };
@@ -28,7 +28,7 @@ pub struct UpdateStatus {
 }
 
 pub fn get_status() -> Result<UpdateStatus> {
-	let path = util::get_argon_dir()?.join("update.toml");
+	let path = util::get_aragon_dir()?.join("update.toml");
 
 	if path.exists() {
 		match toml::from_str(&fs::read_to_string(&path)?) {
@@ -49,7 +49,7 @@ pub fn get_status() -> Result<UpdateStatus> {
 }
 
 pub fn set_status(status: &UpdateStatus) -> Result<()> {
-	let path = util::get_argon_dir()?.join("update.toml");
+	let path = util::get_aragon_dir()?.join("update.toml");
 
 	fs::write(path, toml::to_string(status)?)?;
 
@@ -69,10 +69,15 @@ fn update_cli(prompt: bool, force: bool) -> Result<bool> {
 		}
 	};
 
+	let Some((owner, name)) = option_env!("ARAGON_REPO").and_then(|repo| repo.split_once('/')) else {
+		trace!("This Aragon build has no `ARAGON_REPO` set, skipping CLI update check");
+		return Ok(false);
+	};
+
 	let update = Update::configure()
-		.repo_owner("argon-rbx")
-		.repo_name("argon")
-		.bin_name("argon")
+		.repo_owner(owner)
+		.repo_name(name)
+		.bin_name("aragon")
 		.target(target)
 		.show_download_progress(true)
 		.set_progress_style(style.0, style.1)
@@ -84,86 +89,62 @@ fn update_cli(prompt: bool, force: bool) -> Result<bool> {
 		if !prompt
 			|| logger::prompt(
 				&format!(
-					"New Argon version: {} is available! Would you like to update?",
+					"New Aragon version: {} is available! Would you like to update?",
 					release.version.bold()
 				),
 				true,
 			) {
 			if !prompt {
-				argon_info!("New Argon version: {} is available! Updating..", release.version.bold());
+				aragon_info!(
+					"New Aragon version: {} is available! Updating..",
+					release.version.bold()
+				);
 			}
 
 			match update.update() {
 				Ok(_) => {
-					argon_info!(
-						"CLI updated! Restart the program to apply changes. Visit {} to read the changelog",
-						"https://argon.wiki/changelog/argon".bold()
-					);
+					aragon_info!("CLI updated! Restart the program to apply changes");
 					return Ok(true);
 				}
-				Err(err) => argon_error!("Failed to update Argon: {}", err),
+				Err(err) => aragon_error!("Failed to update Aragon: {}", err),
 			}
 		} else {
-			trace!("Argon is out of date!");
+			trace!("Aragon is out of date!");
 		}
 	} else {
-		trace!("Argon is up to date!");
+		trace!("Aragon is up to date!");
 	}
 
 	Ok(false)
 }
 
 fn update_plugin(status: &mut UpdateStatus, prompt: bool, force: bool) -> Result<bool> {
-	let style = util::get_progress_style();
-	let current_version = &status.plugin_version;
+	// The Studio plugin ships inside the Aragon binary, so "updating" it
+	// means re-installing the bundled copy when it is newer than the installed one
+	let bundled_version = get_plugin_version();
 	let plugin_path = get_plugin_path()?;
 
-	let update = Update::configure()
-		.repo_owner("argon-rbx")
-		.repo_name("argon-roblox")
-		.bin_name("Argon.rbxm")
-		.target("")
-		.show_download_progress(true)
-		.set_progress_style(style.0, style.1)
-		.bin_install_path(plugin_path)
-		.build()?;
+	if bundled_version == "0.0.0" {
+		trace!("No bundled Aragon plugin found!");
+		return Ok(false);
+	}
 
-	let release = update.get_latest_release()?;
-
-	if bump_is_greater(current_version, &release.version)? || force {
+	if !plugin_path.exists() || bump_is_greater(&status.plugin_version, &bundled_version)? || force {
 		if !prompt
 			|| logger::prompt(
 				&format!(
-					"New version of Argon plugin: {} is available! Would you like to update?",
-					release.version.bold()
+					"New version of Aragon plugin: {} is available! Would you like to install it?",
+					bundled_version.bold()
 				),
 				true,
 			) {
-			if !prompt {
-				argon_info!(
-					"New version of Argon plugin: {} is available! Updating..",
-					release.version.bold()
-				);
-			}
+			install_plugin(&plugin_path, false)?;
 
-			match update.download() {
-				Ok(_) => {
-					argon_info!(
-						"Roblox plugin updated! Make sure you have {} setting enabled to see changes. Visit {} to read the changelog",
-						"Reload plugins on file changed".bold(),
-						"https://argon.wiki/changelog/argon-roblox".bold()
-					);
-
-					status.plugin_version = release.version;
-					return Ok(true);
-				}
-				Err(err) => argon_error!("Failed to update Argon plugin: {}", err),
-			}
-		} else {
-			trace!("Argon plugin is out of date!");
+			status.plugin_version = bundled_version;
+			return Ok(true);
 		}
 	} else {
-		trace!("Argon plugin is up to date!");
+		trace!("Aragon plugin is up to date!");
 	}
 
 	Ok(false)
@@ -173,7 +154,7 @@ fn update_templates(status: &mut UpdateStatus, prompt: bool, force: bool) -> Res
 	if status.templates_version < TEMPLATES_VERSION || force {
 		if !prompt || logger::prompt("Default templates have changed! Would you like to update?", true) {
 			if !prompt {
-				argon_info!("Default templates have changed! Updating..",);
+				aragon_info!("Default templates have changed! Updating..",);
 			}
 
 			install_templates(true)?;

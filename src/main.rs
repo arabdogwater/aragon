@@ -9,9 +9,34 @@ use std::{
 	thread,
 };
 
-use argon::{argon_error, cli::Cli, config::Config, crash_handler, installer, logger, stats, updater};
+use aragon::{aragon_error, cli::Cli, config::Config, crash_handler, installer, logger, stats, updater};
 
 const PROFILER_ADDRESS: &str = "localhost:8888";
+
+/// When the exe is double-clicked Explorer gives it a fresh console that only
+/// this process uses; hide it so only the dashboard window shows. Running
+/// from a terminal keeps the console (and logs) as usual.
+#[cfg(windows)]
+fn detach_console_if_double_clicked() {
+	use windows_sys::Win32::{
+		System::Console::{FreeConsole, GetConsoleProcessList, GetConsoleWindow},
+		UI::WindowsAndMessaging::{ShowWindow, SW_HIDE},
+	};
+
+	unsafe {
+		let mut processes = [0u32; 2];
+
+		if GetConsoleProcessList(processes.as_mut_ptr(), 2) == 1 {
+			let window = GetConsoleWindow();
+
+			if !window.is_null() {
+				ShowWindow(window, SW_HIDE);
+			}
+
+			FreeConsole();
+		}
+	}
+}
 
 fn main() -> ExitCode {
 	crash_handler::hook();
@@ -19,10 +44,15 @@ fn main() -> ExitCode {
 	let config_kind = Config::load();
 	let config = Config::new().clone();
 
-	let is_managed = installer::is_managed();
-	let installation = installer::verify(is_managed, config.install_plugin);
-
 	let cli = Cli::new();
+
+	let is_managed = installer::is_managed();
+	let installation = installer::verify(is_managed, config.install_plugin && !cli.is_dashboard());
+
+	#[cfg(windows)]
+	if cli.is_dashboard() {
+		detach_console_if_double_clicked();
+	}
 
 	let yes = cli.yes();
 	let backtrace = cli.backtrace();
@@ -53,8 +83,8 @@ fn main() -> ExitCode {
 	}
 
 	match installation {
-		Ok(()) => info!("Argon installation verified successfully!"),
-		Err(err) => warn!("Failed to verify Argon installation: {err}"),
+		Ok(()) => info!("Aragon installation verified successfully!"),
+		Err(err) => warn!("Failed to verify Aragon installation: {err}"),
 	}
 
 	let handle = thread::spawn(move || {
@@ -94,7 +124,7 @@ fn main() -> ExitCode {
 			ExitCode::SUCCESS
 		}
 		Err(err) => {
-			argon_error!("{}", err);
+			aragon_error!("{}", err);
 			ExitCode::FAILURE
 		}
 	};

@@ -1,0 +1,10 @@
+{
+  "out": ".",
+  "defaults": {"transparent": true, "fit": "1024x1024", "quality": "high"},
+  "jobs": [
+    {"name": "mark", "prompt": "App logo mascot mark, flat vector style with bold clean shapes and soft cel shading, thick dark espresso-brown outline. A shiba inu doge head, front three-quarter view, warm golden amber fur (#FFB81C) with cream muzzle and cheeks, the classic doge side-eye smirk, pointy upright ears, compact rounded silhouette that reads well at 16 pixels. Centered, whole head visible. No text, no watermark.", "n": 2},
+    {"name": "onboarding", "prompt": "Friendly app illustration, flat vector style with bold clean shapes and soft cel shading, thick dark espresso-brown outline, warm golden amber (#FFB81C) and cream palette with a few charcoal accents. A cheerful shiba inu doge sitting upright and proudly holding a golden folder with a small sparkle, classic doge side-eye smirk. Whole character visible, centered. No text, no watermark."},
+    {"name": "sleepy", "prompt": "Friendly app illustration, flat vector style with bold clean shapes and soft cel shading, thick dark espresso-brown outline, warm golden amber (#FFB81C) and cream palette with a few charcoal accents. A shiba inu doge curled up asleep in a cozy ball with a tiny 'z' bubble, peaceful expression, calm and cute. Whole character visible, centered. No watermark."},
+    {"name": "key", "prompt": "Friendly app illustration, flat vector style with bold clean shapes and soft cel shading, thick dark espresso-brown outline, warm golden amber (#FFB81C) and cream palette with a few charcoal accents. A shiba inu doge sitting and holding a large shiny golden key in its paws, classic doge side-eye smirk, confident. Whole character visible, centered. No text, no watermark."}
+  ]
+}

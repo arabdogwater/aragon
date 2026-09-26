@@ -9,6 +9,7 @@ use crate::util;
 
 mod build;
 mod config;
+mod dashboard;
 mod debug;
 mod doc;
 mod exec;
@@ -22,20 +23,19 @@ mod update;
 
 macro_rules! about {
 	() => {
-		concat!("Argon ", env!("CARGO_PKG_VERSION"))
+		concat!("Aragon ", env!("CARGO_PKG_VERSION"))
 	};
 }
 
 macro_rules! long_about {
 	() => {
 		concat!(
-			"Argon ",
+			"Aragon ",
 			env!("CARGO_PKG_VERSION"),
 			"\n",
 			env!("CARGO_PKG_DESCRIPTION"),
 			"\n",
-			"Made with <3 by ",
-			env!("CARGO_PKG_AUTHORS")
+			"Much sync. Very Roblox. Built on Argon by Dervex"
 		)
 	};
 }
@@ -44,7 +44,7 @@ macro_rules! long_about {
 #[clap(about = about!(), long_about = long_about!(), version)]
 pub struct Cli {
 	#[command(subcommand)]
-	command: Commands,
+	command: Option<Commands>,
 
 	#[command(flatten)]
 	verbose: Verbosity,
@@ -118,8 +118,18 @@ impl Cli {
 		}
 	}
 
+	/// No subcommand means "open the dashboard" (double-clicking the exe)
+	pub fn is_dashboard(&self) -> bool {
+		matches!(self.command, None | Some(Commands::Dashboard(_)))
+	}
+
 	pub fn main(self) -> Result<()> {
-		match self.command {
+		let Some(command) = self.command else {
+			return dashboard::Dashboard::default().main();
+		};
+
+		match command {
+			Commands::Dashboard(command) => command.main(),
 			Commands::Init(command) => command.main(),
 			Commands::Serve(command) => command.main(),
 			Commands::Build(command) => command.main(),
@@ -138,6 +148,7 @@ impl Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+	Dashboard(dashboard::Dashboard),
 	Init(init::Init),
 	Serve(serve::Serve),
 	Build(build::Build),
