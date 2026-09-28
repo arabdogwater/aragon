@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-09-28
+
+### Changed
+
+- **Idle dashboard uses ~0% CPU and GPU** (was ~10% CPU / 8% GPU): no looping animations, clouds and bees are baked into one static background, no permanent GPU layers
+- **WebView2 memory ~62 MB → ~19 MB** with the dashboard open and idle
+- Minimizing the dashboard suspends WebView2 immediately; after 30 s minimized it is released entirely (0 MB) and rebuilt on the same page when restored
+- The hub only pushes state to the dashboard when something visible changed, instead of re-rendering the whole page every 30 s
+- Unused browser features (SmartScreen checks, autofill, status bar, gestures) are turned off
+
 ## [1.0.1] - 2026-09-26
 
 ### Fixed
@@ -48,6 +58,7 @@ First release of Aragon, built on Argon 2.0.29.
 - VS Code extension integration. Aragon never needs an external editor
 - Plugin Settings, Help and Project widgets (everything moved to the dashboard)
 
-[Unreleased]: ../../compare/v1.0.1...HEAD
+[Unreleased]: ../../compare/v1.0.2...HEAD
+[1.0.2]: ../../compare/v1.0.1...v1.0.2
 [1.0.1]: ../../compare/v1.0.0...v1.0.1
 [1.0.0]: ../../releases/tag/v1.0.0

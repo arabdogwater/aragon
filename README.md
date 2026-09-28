@@ -7,7 +7,7 @@
 **Sync every Roblox game to your PC from one tiny app. No VS Code, no terminal, no config files.**
 
 [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-ffc21a?style=for-the-badge&logo=windows&logoColor=2b1d0e&labelColor=fff4d8)](#-install)
-[![Release](https://img.shields.io/badge/release-v1.0.1-ffc21a?style=for-the-badge&labelColor=fff4d8&color=ffc21a)](../../releases/latest)
+[![Release](https://img.shields.io/badge/release-v1.0.2-ffc21a?style=for-the-badge&labelColor=fff4d8&color=ffc21a)](../../releases/latest)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-ffc21a?style=for-the-badge&logo=rust&logoColor=2b1d0e&labelColor=fff4d8)](Cargo.toml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-ffc21a?style=for-the-badge&labelColor=fff4d8)](LICENSE.md)
 

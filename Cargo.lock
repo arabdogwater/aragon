@@ -327,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "aragon"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "actix-msgpack",
  "actix-web",

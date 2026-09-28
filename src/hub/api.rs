@@ -17,10 +17,11 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
 	fs,
+	hash::{Hash, Hasher},
 	path::{Path, PathBuf},
 	sync::Arc,
 	thread,
-	time::Duration,
+	time::{Duration, Instant},
 };
 
 use super::{is_inside, secrets, settings, ui, Hub, MapRequest};
@@ -100,6 +101,22 @@ struct SyncedRequest {
 #[derive(Deserialize)]
 struct StateQuery {
 	v: Option<u64>,
+	/// Content hash of the state the dashboard already shows
+	h: Option<String>,
+}
+
+/// Hash of everything the dashboard renders (the version counter excluded)
+fn content_hash(snapshot: &mut Value) -> String {
+	let version = snapshot.as_object_mut().and_then(|object| object.remove("version"));
+
+	let mut hasher = std::collections::hash_map::DefaultHasher::new();
+	snapshot.to_string().hash(&mut hasher);
+
+	if let (Some(object), Some(version)) = (snapshot.as_object_mut(), version) {
+		object.insert("version".into(), version);
+	}
+
+	format!("{:016x}", hasher.finish())
 }
 
 #[get("/api/ping")]
@@ -107,18 +124,36 @@ async fn ping() -> impl Responder {
 	HttpResponse::Ok().json(json!({ "app": "aragon", "version": env!("CARGO_PKG_VERSION") }))
 }
 
-/// Long-polls while the dashboard already has the current version
+/// Long-polls while the dashboard already has the current state. Bumps that
+/// don't change anything the dashboard renders (a background re-scan that found
+/// nothing new, a connector re-checking in) keep waiting instead of making the
+/// dashboard re-render an identical page
 #[get("/api/state")]
 async fn state(query: Query<StateQuery>, hub: HubData) -> impl Responder {
 	let hub = hub.get_ref().clone();
-	let since = query.v;
+	let mut since = query.v;
+	let known = query.h.clone();
 
 	match blocking(move || {
-		if let Some(since) = since {
-			hub.wait_for_change(since, Duration::from_secs(25));
-		}
+		let deadline = Instant::now() + Duration::from_secs(25);
 
-		hub.snapshot()
+		loop {
+			if let Some(version) = since {
+				let left = deadline.saturating_duration_since(Instant::now());
+
+				if !left.is_zero() {
+					since = Some(hub.wait_for_change(version, left));
+				}
+			}
+
+			let mut snapshot = hub.snapshot();
+			let hash = content_hash(&mut snapshot);
+
+			if since.is_none() || known.as_deref() != Some(hash.as_str()) || Instant::now() >= deadline {
+				snapshot["hash"] = json!(hash);
+				return snapshot;
+			}
+		}
 	})
 	.await
 	{

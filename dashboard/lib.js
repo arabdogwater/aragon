@@ -44,13 +44,16 @@ async function pollLoop() {
 
 	for (;;) {
 		try {
-			const version = current ? current.version : null;
-			const next = await api(`/api/state${version ? `?v=${version}` : ""}`);
+			const query = current ? `?v=${current.version}&h=${current.hash}` : "";
+			const next = await api(`/api/state${query}`);
+			const changed = !current || next.hash !== current.hash || !online;
 
 			current = next;
 			online = true;
 			backoff = 500;
-			publish();
+
+			// Nothing on screen would change: skip the re-render entirely
+			if (changed) publish();
 		} catch {
 			if (online) {
 				online = false;

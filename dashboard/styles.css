@@ -158,7 +158,6 @@ a:hover {
 /* The world behind everything ------------------------------------------------ */
 
 .bg-world,
-.bg-layer,
 .bg-veil {
 	position: fixed;
 	pointer-events: none;
@@ -166,86 +165,10 @@ a:hover {
 }
 
 .bg-world {
-	inset: -30px;
-	background: url("assets/world.webp") center bottom / cover no-repeat;
-	transform: translate3d(0, 0, 0) scale(1.05);
-	transition: transform 900ms var(--ease-out-expo);
-	animation: world-in 1.4s var(--ease-out-expo) both;
-}
-
-@keyframes world-in {
-	from {
-		opacity: 0;
-		transform: translate3d(0, 30px, 0) scale(1.12);
-	}
-}
-
-.bg-layer {
 	inset: 0;
-	overflow: hidden;
-	transition: transform 900ms var(--ease-out-expo);
+	background: url("assets/world.webp") center bottom / cover no-repeat;
+	animation: fade-in 600ms var(--ease-out-expo) both;
 }
-
-.cloud {
-	position: absolute;
-	left: 0;
-	will-change: transform;
-	animation: drift linear infinite;
-	filter: drop-shadow(0 4px 0 rgb(43 29 14 / 0.08));
-}
-
-@keyframes drift {
-	from {
-		transform: translate3d(-30vw, 0, 0);
-	}
-	to {
-		transform: translate3d(115vw, 0, 0);
-	}
-}
-
-.bee {
-	position: absolute;
-	width: 46px;
-	will-change: transform;
-	animation: bee-path 26s ease-in-out infinite;
-}
-
-.bee img {
-	width: 100%;
-	display: block;
-	animation: bee-bob 0.9s ease-in-out infinite;
-}
-
-@keyframes bee-bob {
-	50% {
-		transform: translate3d(0, -5px, 0) rotate(4deg);
-	}
-}
-
-@keyframes bee-path {
-	0% {
-		transform: translate3d(-8vw, 0, 0) scaleX(1);
-	}
-	45% {
-		transform: translate3d(48vw, -6vh, 0) scaleX(1);
-	}
-	50% {
-		transform: translate3d(52vw, -4vh, 0) scaleX(-1);
-	}
-	95% {
-		transform: translate3d(-4vw, 3vh, 0) scaleX(-1);
-	}
-	100% {
-		transform: translate3d(-8vw, 0, 0) scaleX(1);
-	}
-}
-
-.still .cloud,
-.still .bee,
-.still .bee img {
-	animation-play-state: paused;
-}
-
 
 /* Soft cream veil behind the reading column so the world stays lively at the edges */
 .bg-veil {
@@ -376,7 +299,6 @@ a:hover {
 	box-shadow: var(--pop-sm);
 	transform: translate3d(0, var(--y, 0), 0);
 	transition: transform 480ms var(--bounce);
-	will-change: transform;
 	z-index: 0;
 }
 
@@ -390,7 +312,7 @@ a:hover {
 	border: 2px solid var(--ink);
 	font: 700 12px/20px var(--display);
 	text-align: center;
-	animation: wiggle 2.4s var(--ease) infinite;
+	animation: wiggle 2.4s var(--ease) 3;
 }
 
 @keyframes wiggle {
@@ -544,19 +466,10 @@ a:hover {
 	inset: -1.5px;
 	border-radius: 50%;
 	background: inherit;
-	animation: ripple 1.8s var(--ease-out-expo) infinite;
+	opacity: 0.3;
+	transform: scale(1.9);
 }
 
-@keyframes ripple {
-	from {
-		transform: scale(1);
-		opacity: 0.8;
-	}
-	to {
-		transform: scale(3);
-		opacity: 0;
-	}
-}
 
 .badge {
 	display: inline-flex;
@@ -1985,7 +1898,6 @@ a:hover {
 
 .empty img {
 	width: 170px;
-	animation: float 6s ease-in-out infinite;
 }
 
 .empty p {
@@ -1997,16 +1909,9 @@ a:hover {
 .skeleton {
 	border-radius: var(--r);
 	border: 2.5px solid var(--line-soft);
-	background: linear-gradient(90deg, var(--paper) 25%, var(--paper-3) 50%, var(--paper) 75%);
-	background-size: 200% 100%;
-	animation: shimmer 1.4s linear infinite;
+	background: var(--paper-2);
 }
 
-@keyframes shimmer {
-	to {
-		background-position: -200% 0;
-	}
-}
 
 /* Onboarding dialog -------------------------------------------------------- */
 
@@ -2085,7 +1990,7 @@ dialog.onboard[open] {
 	width: 100%;
 	max-width: 250px;
 	align-self: center;
-	animation: pop 800ms var(--bounce) 160ms both, float 5.5s ease-in-out 1s infinite;
+	animation: pop 800ms var(--bounce) 160ms both;
 }
 
 .onboard-main {
@@ -2343,7 +2248,6 @@ dialog.onboard[open] {
 .tilt {
 	transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) translateZ(0);
 	transition: transform 300ms var(--ease-out-expo), box-shadow var(--med) var(--ease);
-	will-change: transform;
 }
 
 .tilt:hover {
@@ -2366,27 +2270,17 @@ dialog.onboard[open] {
 }
 
 .mascot {
-	animation: float 5.5s ease-in-out infinite;
 	filter: drop-shadow(0 6px 0 rgb(43 29 14 / 0.18));
 }
 
 .mascot.pop {
-	animation: pop 900ms var(--bounce) both, float 5.5s ease-in-out 0.9s infinite;
+	animation: pop 900ms var(--bounce) both;
 }
 
 .pop {
 	animation: pop 800ms var(--bounce) both;
 }
 
-@keyframes float {
-	0%,
-	100% {
-		transform: translate3d(0, 0, 0) rotate(-2deg);
-	}
-	50% {
-		transform: translate3d(0, -10px, 0) rotate(2deg);
-	}
-}
 
 @keyframes pop {
 	from {

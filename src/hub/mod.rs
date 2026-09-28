@@ -357,7 +357,12 @@ impl Hub {
 				place.name.clone_from(&request.place_name);
 			}
 
-			place.last_connected = Some(now());
+			// Coarse on purpose: a connector re-checking every few seconds shouldn't
+			// count as a state change for the dashboard
+			if place.last_connected.is_none_or(|last| now() - last >= 60) {
+				place.last_connected = Some(now());
+			}
+
 			is_new
 		};
 
@@ -405,7 +410,17 @@ impl Hub {
 			last_seen: Instant::now(),
 		};
 
-		let was_known = lock!(self.sessions).insert(request.client_id, session).is_some();
+		let was_known = {
+			let mut sessions = lock!(self.sessions);
+			let previous = sessions.insert(request.client_id, session);
+
+			// Keep when this Studio first connected, a re-hello isn't a new session
+			if let (Some(previous), Some(current)) = (&previous, sessions.get_mut(&request.client_id)) {
+				current.connected_at = previous.connected_at;
+			}
+
+			previous.is_some()
+		};
 		lock!(self.controls).entry(request.client_id).or_default();
 
 		if state == SessionState::Onboarding
