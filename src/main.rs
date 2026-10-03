@@ -1,5 +1,5 @@
 use env_logger::WriteStyle;
-use log::{debug, error, info, warn};
+use log::{debug, error, info, warn, LevelFilter};
 use puffin_http::Server;
 use std::{
 	env,
@@ -9,7 +9,7 @@ use std::{
 	thread,
 };
 
-use aragon::{aragon_error, cli::Cli, config::Config, crash_handler, installer, logger, stats, updater};
+use aragon::{aragon_error, cli::Cli, config::Config, crash_handler, installer, logger, stats, updater, util};
 
 const PROFILER_ADDRESS: &str = "localhost:8888";
 
@@ -56,8 +56,20 @@ fn main() -> ExitCode {
 
 	let yes = cli.yes();
 	let backtrace = cli.backtrace();
-	let verbosity = cli.verbosity();
+	let mut verbosity = cli.verbosity();
 	let log_style = cli.log_style();
+
+	// The hub runs in the tray with no console, so it always keeps a log file
+	// (~/.aragon/logs/hub.log) with at least info level: sync failures must be findable
+	let log_file = cli
+		.is_dashboard()
+		.then(|| util::get_aragon_dir().ok())
+		.flatten()
+		.map(|dir| dir.join("logs").join("hub.log"));
+
+	if log_file.is_some() && verbosity < LevelFilter::Info {
+		verbosity = LevelFilter::Info;
+	}
 
 	if log_style == WriteStyle::Auto && io::stdin().is_terminal() {
 		env::set_var("RUST_LOG_STYLE", "always");
@@ -75,7 +87,7 @@ fn main() -> ExitCode {
 	env::set_var("RUST_YES", if yes { "1" } else { "0" });
 	env::set_var("RUST_BACKTRACE", if backtrace { "1" } else { "0" });
 
-	logger::init(verbosity, log_style);
+	logger::init_with_file(verbosity, log_style, log_file.as_deref());
 
 	match config_kind {
 		Ok(kind) => info!("{kind:?} config loaded"),

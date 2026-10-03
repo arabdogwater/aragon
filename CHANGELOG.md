@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-09-30
+
+### Fixed
+
+- **Importing a game from Studio could silently write only part of it.** The hub applied a Studio write as one all-or-nothing batch, so the first instance it couldn't write aborted everything after it. A place with Wally packages (`ReplicatedStorage.Packages`) lost every script that came after them: 35 of 209 scripts reached disk, and ServerScriptService and StarterPlayer never did. Each change is now applied on its own, and a failure is logged without dropping the rest
+- Project folders declared with `$path` that don't exist yet (like `Packages` before `wally install`) are created on the first write from Studio instead of failing with "The system cannot find the path specified"
+- A Studio write whose parent has no source on disk no longer crashes the whole hub (it used to `panic!`, and the crash handler exits the process)
+
+### Added
+
+- The hub writes a log to `~/.aragon/logs/hub.log` (timestamped, at least info level, restarted after 4 MB). The tray app has no console, so its sync errors used to be invisible
+
 ## [1.0.2] - 2026-09-28
 
 ### Changed

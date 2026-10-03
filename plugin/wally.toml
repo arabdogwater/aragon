@@ -4,7 +4,7 @@ authors = ["Dervex (Argon)", "Aragon contributors"]
 description = "Aragon Studio connector"
 registry = "https://github.com/UpliftGames/wally-index"
 license = "Apache-2.0"
-version = "1.0.2"
+version = "1.0.3"
 realm = "shared"
 private = true
 

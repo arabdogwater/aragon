@@ -2,10 +2,15 @@ use colored::{Color, Colorize};
 use dialoguer::console::{style, Style, StyledObject};
 use dialoguer::theme::Theme;
 use dialoguer::Confirm;
-use env_logger::{Builder, WriteStyle};
+use env_logger::{Builder, Target, WriteStyle};
 use log::{Level, LevelFilter};
 use std::fmt::{Display, Formatter};
-use std::{fmt, io::Write};
+use std::{
+	fmt,
+	fs::{self, File, OpenOptions},
+	io::{self, Write},
+	path::Path,
+};
 
 use crate::util;
 
@@ -25,8 +30,100 @@ macro_rules! aragon_info {
     ($($arg:tt)+) => (log::log!(target: "aragon_log", log::Level::Info, $($arg)+))
 }
 
+/// Log file is started over once it grows past this
+const MAX_LOG_FILE_SIZE: u64 = 4 * 1024 * 1024;
+
+/// Writes every log line to the console and, without color codes and with a
+/// timestamp, to a file. The hub hides its console when double-clicked, so
+/// without the file its errors (e.g. syncback failures) would be invisible
+struct Tee {
+	file: File,
+	line_start: bool,
+}
+
+impl Tee {
+	fn open(path: &Path) -> io::Result<Self> {
+		if let Some(parent) = path.parent() {
+			fs::create_dir_all(parent)?;
+		}
+
+		let append = fs::metadata(path).is_ok_and(|meta| meta.len() < MAX_LOG_FILE_SIZE);
+		let mut file = OpenOptions::new()
+			.create(true)
+			.write(true)
+			.append(append)
+			.truncate(!append)
+			.open(path)?;
+
+		writeln!(file, "\n===== Aragon {} started =====", env!("CARGO_PKG_VERSION"))?;
+
+		Ok(Self { file, line_start: true })
+	}
+}
+
+impl Write for Tee {
+	fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+		// The console may be gone (detached on double-click); the file still matters
+		io::stderr().write_all(buf).ok();
+
+		let text = String::from_utf8_lossy(buf);
+		let mut clean = String::with_capacity(text.len() + 24);
+		let mut chars = text.chars().peekable();
+
+		while let Some(char) = chars.next() {
+			// Strip ANSI color sequences (ESC [ ... letter)
+			if char == '\u{1b}' {
+				if chars.peek() == Some(&'[') {
+					chars.next();
+
+					for next in chars.by_ref() {
+						if next.is_ascii_alphabetic() {
+							break;
+						}
+					}
+				}
+
+				continue;
+			}
+
+			if self.line_start {
+				clean.push_str(&chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f ").to_string());
+				self.line_start = false;
+			}
+
+			clean.push(char);
+
+			if char == '\n' {
+				self.line_start = true;
+			}
+		}
+
+		self.file.write_all(clean.as_bytes()).ok();
+
+		Ok(buf.len())
+	}
+
+	fn flush(&mut self) -> io::Result<()> {
+		io::stderr().flush().ok();
+		self.file.flush()
+	}
+}
+
 pub fn init(verbosity: LevelFilter, log_style: WriteStyle) {
+	init_with_file(verbosity, log_style, None);
+}
+
+pub fn init_with_file(verbosity: LevelFilter, log_style: WriteStyle, log_file: Option<&Path>) {
 	let mut builder = Builder::new();
+
+	if let Some(path) = log_file {
+		match Tee::open(path) {
+			Ok(tee) => {
+				builder.target(Target::Pipe(Box::new(tee)));
+			}
+			Err(err) => eprintln!("Failed to open log file {}: {err}", path.display()),
+		}
+	}
 
 	builder.format(move |buffer, record| {
 		if record.level() > verbosity && record.target() != "aragon_log" {

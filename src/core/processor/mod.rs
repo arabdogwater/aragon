@@ -209,25 +209,41 @@ impl Handler {
 
 		let mut tree = lock!(self.tree);
 
-		let result = || -> Result<()> {
-			for snapshot in changes.additions {
-				write::apply_addition(snapshot, &mut tree, &self.vfs)?;
+		// Every change is applied on its own: one instance that can't be written
+		// (bad path, missing folder, ...) must never drop the rest of the batch.
+		// The initial "Studio wins" sync sends the whole game in one write
+		let total = changes.total();
+		let mut failed = 0;
+
+		for snapshot in changes.additions {
+			let name = snapshot.name.clone();
+
+			if let Err(err) = write::apply_addition(snapshot, &mut tree, &self.vfs) {
+				error!("Failed to add {name}: {err:#}");
+				failed += 1;
 			}
+		}
 
-			for snapshot in changes.updates {
-				write::apply_update(snapshot, &mut tree, &self.vfs)?;
+		for snapshot in changes.updates {
+			let id = snapshot.id;
+
+			if let Err(err) = write::apply_update(snapshot, &mut tree, &self.vfs) {
+				error!("Failed to update {id:?}: {err:#}");
+				failed += 1;
 			}
+		}
 
-			for id in changes.removals {
-				write::apply_removal(id, &mut tree, &self.vfs)?;
+		for id in changes.removals {
+			if let Err(err) = write::apply_removal(id, &mut tree, &self.vfs) {
+				error!("Failed to remove {id:?}: {err:#}");
+				failed += 1;
 			}
+		}
 
-			Ok(())
-		}();
-
-		match result {
-			Ok(()) => trace!("Changes applied successfully"),
-			Err(err) => error!("Failed to apply changes: {err}"),
+		if failed == 0 {
+			trace!("Changes applied successfully");
+		} else {
+			error!("{failed} of {total} changes from Studio could not be written to disk");
 		}
 
 		self.queue.push(server::SyncbackChanges(), Some(0)).ok();

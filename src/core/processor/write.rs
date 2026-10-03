@@ -303,6 +303,17 @@ pub fn apply_addition(snapshot: AddedSnapshot, tree: &mut Tree, vfs: &Vfs) -> Re
 			if let Some(custom_path) = &node.path {
 				let custom_path = path.with_file_name(custom_path.path()).clean();
 
+				// A `$path` the project declares but that doesn't exist yet (e.g. `Packages`
+				// before `wally install`) is served as an empty folder; create it on
+				// first write so Studio's instances land there instead of failing
+				if !vfs.exists(&custom_path) && custom_path.extension().is_none() {
+					dir::write_dir(&custom_path, vfs)?;
+
+					if let Err(err) = vfs.watch(&custom_path, true) {
+						warn!("Failed to watch {}: {err}", custom_path.display());
+					}
+				}
+
 				let parent_source =
 					add_non_project_instances(parent_id, &custom_path, snapshot, &mut parent_meta, tree, vfs)?;
 
@@ -323,10 +334,15 @@ pub fn apply_addition(snapshot: AddedSnapshot, tree: &mut Tree, vfs: &Vfs) -> Re
 				project.save(&path)?;
 			}
 		}
-		SourceKind::None => panic!(
-			"Attempted to add instance whose parent has no source: {:?}",
-			snapshot.id
-		),
+		// Used to be a panic, which killed the processor thread and silently
+		// stopped all syncback for the place until the hub restarted
+		SourceKind::None => {
+			return Err(anyhow!(
+				"Parent of {} ({:?}) has no source on disk",
+				snapshot.name,
+				snapshot.id
+			));
+		}
 	}
 
 	Ok(())
@@ -537,14 +553,10 @@ pub fn apply_update(snapshot: UpdatedSnapshot, tree: &mut Tree, vfs: &Vfs) -> Re
 
 			tree.update_meta(snapshot.id, meta);
 
-			if let Some(_class) = snapshot.class {
-				// You can't change the class of an instance inside Roblox Studio
-				unreachable!()
-			}
-
-			if let Some(_meta) = snapshot.meta {
-				// Currently Aragon client does not update meta
-				unreachable!()
+			// Studio can't change an instance's class and the client never sends
+			// meta; ignore instead of crashing the whole hub if that ever changes
+			if snapshot.class.is_some() || snapshot.meta.is_some() {
+				warn!("Ignoring class/meta update of {:?}", snapshot.id);
 			}
 		}
 		SourceKind::Project(name, path, node, node_path) => {
@@ -603,17 +615,13 @@ pub fn apply_update(snapshot: UpdatedSnapshot, tree: &mut Tree, vfs: &Vfs) -> Re
 			tree.update_meta(snapshot.id, meta);
 			project.save(&path)?;
 
-			if let Some(_class) = snapshot.class {
-				// You can't change the class of an instance inside Roblox Studio
-				unreachable!()
-			}
-
-			if let Some(_meta) = snapshot.meta {
-				// Currently Aragon client does not update meta
-				unreachable!()
+			// Studio can't change an instance's class and the client never sends
+			// meta; ignore instead of crashing the whole hub if that ever changes
+			if snapshot.class.is_some() || snapshot.meta.is_some() {
+				warn!("Ignoring class/meta update of {:?}", snapshot.id);
 			}
 		}
-		SourceKind::None => panic!("Attempted to update instance with no source: {:?}", snapshot.id),
+		SourceKind::None => return Err(anyhow!("Attempted to update instance with no source: {:?}", snapshot.id)),
 	}
 
 	Ok(())
