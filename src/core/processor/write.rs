@@ -621,7 +621,12 @@ pub fn apply_update(snapshot: UpdatedSnapshot, tree: &mut Tree, vfs: &Vfs) -> Re
 				warn!("Ignoring class/meta update of {:?}", snapshot.id);
 			}
 		}
-		SourceKind::None => return Err(anyhow!("Attempted to update instance with no source: {:?}", snapshot.id)),
+		SourceKind::None => {
+			return Err(anyhow!(
+				"Attempted to update instance with no source: {:?}",
+				snapshot.id
+			))
+		}
 	}
 
 	Ok(())
