@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-10-09
+
+### Fixed
+
+- **Folders linked into a project (symlinks / Windows junctions) never synced their edits.** Windows' recursive file watcher stops at a junction, so a change inside a linked folder (a shared module library linked into several games) reached Studio only after the hub restarted. Every link inside a watched `$path` (or a `$path` that is itself a link) now gets its own watch on the real folder, and its events are reported under the link path the project knows. Links nested inside linked folders are followed too
+
 ## [1.0.3] - 2026-09-30
 
 ### Fixed

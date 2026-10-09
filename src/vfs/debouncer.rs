@@ -4,7 +4,7 @@ use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use notify_debouncer_full::{new_debouncer, DebouncedEvent, Debouncer, FileIdMap};
 use std::{
 	io::{self, Result},
-	path::Path,
+	path::{Path, PathBuf},
 	sync::{mpsc, Arc, RwLock},
 	thread::Builder,
 	time::{Duration, Instant},
@@ -17,10 +17,7 @@ use notify::event::DataChange;
 use notify::event::ModifyKind;
 
 #[cfg(target_os = "linux")]
-use {
-	notify::event::{AccessKind, AccessMode, RenameMode},
-	std::path::PathBuf,
-};
+use notify::event::{AccessKind, AccessMode, RenameMode};
 
 use super::VfsEvent;
 use crate::constants::SYNCBACK_DEBOUNCE_TIME;
@@ -40,14 +37,41 @@ struct DebounceContext {
 	path: PathBuf,
 }
 
+/// (link, resolved target) pairs: events under a target are reported under its link.
+pub type Links = Arc<RwLock<Vec<(PathBuf, PathBuf)>>>;
+
 pub struct VfsDebouncer {
 	inner: Debouncer<RecommendedWatcher, FileIdMap>,
 	pause_state: Arc<RwLock<(bool, Instant)>>,
 	receiver: Receiver<VfsEvent>,
 }
 
+/// Maps a path inside a link's target back onto the link (the path the tree knows).
+fn relink(event: VfsEvent, links: &Links) -> VfsEvent {
+	let links = links.read().unwrap();
+
+	let Some((link, rest)) = links
+		.iter()
+		.find_map(|(link, target)| event.path().strip_prefix(target).ok().map(|rest| (link, rest)))
+	else {
+		return event;
+	};
+
+	let path = if rest.as_os_str().is_empty() {
+		link.clone()
+	} else {
+		link.join(rest)
+	};
+
+	match event {
+		VfsEvent::Create(_) => VfsEvent::Create(path),
+		VfsEvent::Delete(_) => VfsEvent::Delete(path),
+		VfsEvent::Write(_) => VfsEvent::Write(path),
+	}
+}
+
 impl VfsDebouncer {
-	pub fn new() -> Self {
+	pub fn new(links: Links) -> Self {
 		let (inner_sender, inner_receiver) = mpsc::channel();
 		let (sender, receiver) = crossbeam_channel::unbounded();
 
@@ -77,12 +101,12 @@ impl VfsDebouncer {
 
 						#[cfg(not(target_os = "linux"))]
 						if let Some(event) = debounce(&event) {
-							sender.send(event).unwrap();
+							sender.send(relink(event, &links)).unwrap();
 						}
 
 						#[cfg(target_os = "linux")]
 						if let Some(event) = debounce(&event, &mut context) {
-							sender.send(event).unwrap();
+							sender.send(relink(event, &links)).unwrap();
 						}
 					}
 				}
