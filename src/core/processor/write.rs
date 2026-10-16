@@ -272,21 +272,39 @@ pub fn apply_addition(snapshot: AddedSnapshot, tree: &mut Tree, vfs: &Vfs) -> Re
 		}
 
 		let node_path = node_path.join(&snapshot.name);
-		let source = Source::project(&snapshot.name, path, node.clone(), node_path.clone());
-		let meta = snapshot
-			.meta
-			.clone()
-			.with_context(&parent_meta.context)
-			.with_source(source);
+		let meta = snapshot.meta.clone().with_context(&parent_meta.context);
+		let children = std::mem::take(&mut snapshot.children);
 
-		snapshot.meta = meta;
+		snapshot.meta =
+			meta.clone()
+				.with_source(Source::project(&snapshot.name, path, node.clone(), node_path.clone()));
 		tree.insert_instance_with_ref(snapshot.clone(), parent_id);
 
 		let filter = snapshot.meta.context.syncback_filter();
 
-		for mut child in snapshot.children {
+		// Children go under THIS instance (its own ref). They used to be inserted under `parent_id`, which
+		// flattened the subtree into the grandparent in the tree while the project file nested it correctly:
+		// the next re-read of the project paired nothing, so Studio was told to remove every one of those
+		// instances (with any Studio-only content inside) and re-add them from disk
+		for mut child in children {
 			child.properties = validate_properties(child.properties, filter);
-			add_project_instances(parent_id, path, node_path.clone(), child, &mut node, parent_meta, tree);
+			add_project_instances(
+				snapshot.id,
+				path,
+				node_path.clone(),
+				child,
+				&mut node,
+				parent_meta,
+				tree,
+			);
+		}
+
+		// The source holds this node WITH its children, so re-snapshotting this node alone keeps them
+		if !node.tree.is_empty() {
+			tree.update_meta(
+				snapshot.id,
+				meta.with_source(Source::project(&snapshot.name, path, node.clone(), node_path)),
+			);
 		}
 
 		parent_node.tree.insert(snapshot.name, node);

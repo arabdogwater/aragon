@@ -79,6 +79,71 @@ local function warnNotCreatable(class: string)
 	end
 end
 
+-- KeepUnknowns on removals. Instances Aragon doesn't track are Studio-only (never synced to files: baked VFX,
+-- configured Animate values, ...). Removing a tracked instance used to destroy them with it, whatever the setting.
+
+local function holdsUnknowns(tree, instance: Instance): boolean
+	for _, descendant in instance:GetDescendants() do
+		if not tree:getId(descendant) then
+			return true
+		end
+	end
+	return false
+end
+
+local function findReplacement(tree, instance: Instance): Instance?
+	local parent = instance.Parent
+	if not parent then
+		return nil
+	end
+	for _, sibling in parent:GetChildren() do
+		if
+			sibling ~= instance
+			and sibling.Name == instance.Name
+			and sibling.ClassName == instance.ClassName
+			and tree:getId(sibling)
+		then
+			return sibling
+		end
+	end
+	return nil
+end
+
+-- Moves the Studio-only content of `from` into `into` (its same-named replacement), recursing through children
+-- both have, so nothing that only exists in Studio is lost when the server re-creates a subtree.
+local function mergeUnknowns(tree, from: Instance, into: Instance)
+	for _, child in from:GetChildren() do
+		local twin: Instance? = nil
+		for _, other in into:GetChildren() do
+			if other.Name == child.Name and other.ClassName == child.ClassName then
+				twin = other
+				break
+			end
+		end
+		if twin then
+			mergeUnknowns(tree, child, twin)
+		elseif not tree:getId(child) then
+			child.Parent = into
+		end
+	end
+end
+
+-- Keeps `instance` in place as a Studio-only container: tracked descendants holding nothing Studio-only are
+-- removed as the server asked, the rest is detached from the tree (no longer synced) but kept.
+local function detachKeepingUnknowns(tree, instance: Instance)
+	for _, child in instance:GetChildren() do
+		if tree:getId(child) then
+			if holdsUnknowns(tree, child) then
+				detachKeepingUnknowns(tree, child)
+			else
+				tree:removeByInstance(child)
+				child.Parent = nil
+			end
+		end
+	end
+	tree:removeByInstance(instance)
+end
+
 local WriteProcessor = {}
 WriteProcessor.__index = WriteProcessor
 
@@ -399,6 +464,22 @@ function WriteProcessor:applyRemoval(object: Types.Ref | Instance, initial: bool
 			Log.warn(err)
 
 			return
+		end
+
+		local meta = self.tree:getMeta(object)
+
+		if (Config:get("KeepUnknowns") or (meta and meta.keepUnknowns)) and holdsUnknowns(self.tree, instance) then
+			-- additions run before removals, so a subtree the server re-created is already here
+			local replacement = findReplacement(self.tree, instance)
+
+			if replacement then
+				mergeUnknowns(self.tree, instance, replacement)
+			else
+				detachKeepingUnknowns(self.tree, instance)
+				Log.info("Kept", instance:GetFullName(), "(removed from files, but it holds Studio-only instances)")
+
+				return instance
+			end
 		end
 
 		self.tree:removeById(object)

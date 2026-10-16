@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-10-17
+
+### Fixed
+
+- **"Keep unknowns" didn't keep anything when the files removed or re-created an instance.** The setting only
+  applied when an instance's own keep flag changed, so a removal from disk destroyed every Studio-only instance
+  inside it: deleting the last file of a folder took the Studio-only VFX in that folder with it. With the setting on
+  (or `$keepUnknowns` on the node), a removed instance that holds Studio-only instances now stays in Studio, detached
+  from sync (synced children with nothing Studio-only inside are still removed). When the same batch re-creates it
+  (same parent, name and class), its Studio-only children move into the new one
+- **Instances synced from Studio into a project file were deleted from Studio on the next edit of that file.** An
+  instance with children added under a project node (no `$path`) was written to the project file correctly, but its
+  children were registered under its parent in the sync tree. The next time the project file was read nothing
+  paired, so Studio was told to remove the whole subtree and re-add it from disk, losing whatever wasn't on disk (a
+  StarterCharacter's configured Animate lost all its animation values). Children now sit under their own parent, and
+  the instance's project node keeps them
+
 ## [1.0.4] - 2026-10-09
 
 ### Fixed
