@@ -87,6 +87,9 @@ glob = "0.3.3"
 open = "5.3.3"
 log = "0.4.29"
 csv = "1.4.0"
+regex = "1.11"
+sha2 = "0.10"
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
 
 # Aragon hub + native dashboard
 wry = "0.57"

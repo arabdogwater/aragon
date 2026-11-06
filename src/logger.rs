@@ -10,6 +10,7 @@ use std::{
 	fs::{self, File, OpenOptions},
 	io::{self, Write},
 	path::Path,
+	sync::OnceLock,
 };
 
 use crate::util;
@@ -28,6 +29,17 @@ macro_rules! aragon_warn {
 #[macro_export]
 macro_rules! aragon_info {
     ($($arg:tt)+) => (log::log!(target: "aragon_log", log::Level::Info, $($arg)+))
+}
+
+/// Receives every warning and error (level, message, name of the thread that logged it). It runs inside
+/// the logger, so it must be quick and must never log or take a lock a logging thread could hold
+pub type LogListener = Box<dyn Fn(Level, String, Option<String>) + Send + Sync>;
+
+static LISTENER: OnceLock<LogListener> = OnceLock::new();
+
+/// The hub turns sync warnings into readable problems in the dashboard
+pub fn set_listener(listener: LogListener) {
+	LISTENER.set(listener).ok();
 }
 
 /// Log file is started over once it grows past this
@@ -126,6 +138,16 @@ pub fn init_with_file(verbosity: LevelFilter, log_style: WriteStyle, log_file: O
 	}
 
 	builder.format(move |buffer, record| {
+		if record.level() <= Level::Warn {
+			if let Some(listener) = LISTENER.get() {
+				listener(
+					record.level(),
+					record.args().to_string(),
+					std::thread::current().name().map(str::to_owned),
+				);
+			}
+		}
+
 		if record.level() > verbosity && record.target() != "aragon_log" {
 			return Ok(());
 		}

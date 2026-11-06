@@ -259,3 +259,90 @@ export function useInterval(fn, ms) {
 		return () => clearInterval(id);
 	}, [ms]);
 }
+
+/// Polls `fn` every `ms` while mounted (and once right away); `fn` may return a promise
+export function usePoll(fn, ms, deps = []) {
+	const saved = useRef(fn);
+	saved.current = fn;
+
+	useEffect(() => {
+		let alive = true;
+		let timer = null;
+
+		const tick = async () => {
+			try {
+				await saved.current();
+			} catch {}
+
+			if (alive) timer = setTimeout(tick, ms);
+		};
+
+		tick();
+
+		return () => {
+			alive = false;
+			clearTimeout(timer);
+		};
+	}, [ms, ...deps]);
+}
+
+/// Milliseconds timestamp, relative and short ("4s ago")
+export function agoMs(t) {
+	if (!t) return "";
+
+	const seconds = Math.max(0, (Date.now() - t) / 1000);
+
+	if (seconds < 5) return "just now";
+	if (seconds < 60) return `${Math.round(seconds)}s ago`;
+
+	return ago(t / 1000);
+}
+
+export function fmtBytes(bytes) {
+	if (!bytes) return "0 B";
+	if (bytes < 1024) return `${bytes} B`;
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+
+	return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// Opening files ----------------------------------------------------------------
+// One place decides where a file opens: the built-in editor (at the line) or the editor picked in Settings
+
+let pendingLine = null;
+
+/// The built-in editor reveals this line once the file is loaded
+export function takePendingLine(path) {
+	if (pendingLine && pendingLine.path === path) {
+		const line = pendingLine.line;
+		pendingLine = null;
+		return line;
+	}
+
+	return null;
+}
+
+export function setPendingLine(path, line) {
+	pendingLine = line ? { path, line } : null;
+
+	// An editor already showing that file jumps right away
+	if (pendingLine) dispatchEvent(new CustomEvent("aragon-line"));
+}
+
+export function openFile(state, key, path, line) {
+	const editor = state && state.prefs.externalEditor;
+
+	if (editor && editor !== "builtin") {
+		return post(`/api/places/${key}/open`, { path, line: line || 1 }).catch((err) => toast(err.message, "err"));
+	}
+
+	setPendingLine(path, line);
+	go(`#/editor/${key}/${path}`);
+}
+
+export function editorName(state) {
+	const id = state && state.prefs.externalEditor;
+	const editor = state && state.editors.find((e) => e.id === id);
+
+	return editor ? editor.name : null;
+}

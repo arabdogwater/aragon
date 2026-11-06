@@ -10,14 +10,15 @@ use crate::server::CoreRef;
 #[serde(rename_all = "camelCase")]
 struct Request {
 	instance: Ref,
-	_line: u32,
+	#[serde(default)]
+	line: u32,
 }
 
 #[post("/open")]
 async fn main(request: MsgPack<Request>, core: CoreRef) -> impl Responder {
 	trace!("Received request: open");
 
-	match core.open(request.instance) {
+	match core.open(request.instance, request.line) {
 		Ok(_) => HttpResponse::Ok().body("Opened file successfully"),
 		Err(err) => HttpResponse::InternalServerError().body(err.to_string()),
 	}

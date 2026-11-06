@@ -34,6 +34,19 @@ impl Dashboard {
 	pub fn main(self) -> Result<()> {
 		let port = self.port.unwrap_or(hub::HUB_PORT);
 
+		// Restarted by the in-app updater: the old hub is still shutting down and holds the port for a moment
+		if std::env::var_os("ARAGON_WAIT_FOR_PORT").is_some() {
+			std::env::remove_var("ARAGON_WAIT_FOR_PORT");
+
+			for _ in 0..100 {
+				if server::is_port_free("localhost", port) {
+					break;
+				}
+
+				thread::sleep(Duration::from_millis(200));
+			}
+		}
+
 		// Single instance: if a hub already runs, just bring its window up
 		if !server::is_port_free("localhost", port) {
 			let client = Client::builder().timeout(Duration::from_secs(2)).build()?;

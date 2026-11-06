@@ -2,7 +2,7 @@ use crossbeam_channel::Receiver;
 use std::{
 	io::Result,
 	path::{Path, PathBuf},
-	sync::Mutex,
+	sync::{Arc, Mutex, RwLock},
 };
 
 use self::{mem_backend::MemBackend, std_backend::StdBackend};
@@ -49,20 +49,46 @@ impl VfsEvent {
 	}
 }
 
+/// What a write from Studio did to a file on disk
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JournalKind {
+	Created,
+	Updated,
+	Removed,
+	Renamed,
+}
+
+/// Watches what syncing does to the disk. The hub uses it to keep a copy of every file Studio overwrites or
+/// deletes (the safety net) and to show live sync activity. Every call happens on the sync thread, before the
+/// lock on the file system is taken, so an implementation may read the files freely
+pub trait VfsJournal: Send + Sync {
+	/// `path` exists and is about to be overwritten with `contents`
+	fn before_write(&self, path: &Path, contents: &[u8]);
+	/// `path` (a file or a whole folder) is about to be deleted
+	fn before_remove(&self, path: &Path);
+	/// A write from Studio reached the disk
+	fn written(&self, path: &Path, kind: JournalKind);
+	/// A change made on disk (an editor, an AI agent) was sent to Studio
+	fn incoming(&self, path: &Path, changes: usize);
+}
+
 pub struct Vfs {
 	inner: Mutex<Box<dyn VfsBackend>>,
+	journal: RwLock<Option<Arc<dyn VfsJournal>>>,
 }
 
 impl Vfs {
 	pub fn new(watch: bool) -> Self {
 		Self {
 			inner: Mutex::new(Box::new(StdBackend::new(watch))),
+			journal: RwLock::new(None),
 		}
 	}
 
 	pub fn new_virtual() -> Self {
 		Self {
 			inner: Mutex::new(Box::new(MemBackend::new())),
+			journal: RwLock::new(None),
 		}
 	}
 
@@ -78,8 +104,36 @@ impl Vfs {
 		lock!(self.inner).read_dir(path)
 	}
 
+	pub fn set_journal(&self, journal: Arc<dyn VfsJournal>) {
+		*self.journal.write().unwrap() = Some(journal);
+	}
+
+	fn journal(&self) -> Option<Arc<dyn VfsJournal>> {
+		self.journal.read().unwrap().clone()
+	}
+
+	/// Reports a change made on disk that was synced to Studio
+	pub fn journal_incoming(&self, path: &Path, changes: usize) {
+		if let Some(journal) = self.journal() {
+			journal.incoming(path, changes);
+		}
+	}
+
 	pub fn write(&self, path: &Path, contents: &[u8]) -> Result<()> {
-		lock!(self.inner).write(path, contents)
+		let Some(journal) = self.journal() else {
+			return lock!(self.inner).write(path, contents);
+		};
+
+		let existed = self.is_file(path);
+
+		if existed {
+			journal.before_write(path, contents);
+		}
+
+		lock!(self.inner).write(path, contents)?;
+		journal.written(path, if existed { JournalKind::Updated } else { JournalKind::Created });
+
+		Ok(())
 	}
 
 	pub fn create_dir(&self, path: &Path) -> Result<()> {
@@ -87,11 +141,29 @@ impl Vfs {
 	}
 
 	pub fn rename(&self, from: &Path, to: &Path) -> Result<()> {
-		lock!(self.inner).rename(from, to)
+		lock!(self.inner).rename(from, to)?;
+
+		if let Some(journal) = self.journal() {
+			journal.written(to, JournalKind::Renamed);
+		}
+
+		Ok(())
 	}
 
 	pub fn remove(&self, path: &Path) -> Result<()> {
-		lock!(self.inner).remove(path)
+		let journal = self.journal();
+
+		if let Some(journal) = &journal {
+			journal.before_remove(path);
+		}
+
+		lock!(self.inner).remove(path)?;
+
+		if let Some(journal) = &journal {
+			journal.written(path, JournalKind::Removed);
+		}
+
+		Ok(())
 	}
 
 	pub fn exists(&self, path: &Path) -> bool {

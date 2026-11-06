@@ -1,5 +1,6 @@
 import { html, useState } from "../vendor/preact-htm.js";
-import { go, post, api, fmt, fmtFull, fmtMinutes, ago, series, sum, placeStatus, useAction, toast } from "../lib.js";
+import { go, post, api, fmt, fmtFull, fmtMinutes, ago, series, sum, placeStatus, useAction, toast, editorName } from "../lib.js";
+import { ActivityPanel, OutputPanel, ProblemsPanel, HistoryPanel, OutputLines, useOutput } from "./insights.js";
 import { Icon, Thumb, Copyable, Button, BarChart, Languages, Switch, Seg } from "../ui.js";
 import { CountUp } from "../motion.js";
 import { SettingControl } from "./settings.js";
@@ -101,18 +102,26 @@ function StudioSettings({ place, state }) {
 	</section>`;
 }
 
-function RunCode({ place }) {
+function RunCode({ place, state }) {
 	const [code, setCode] = useState('print("Hello from Aragon 🐕")');
 	const [busy, run] = useAction();
+	const [sentAt, setSentAt] = useState(null);
+	const [lines] = useOutput(place);
 	const live = place.syncedClients > 0;
 
-	const exec = () => run("exec", () => post(`/api/places/${place.key}/action`, { action: "exec", code }), "Sent to Studio");
+	const exec = async () => {
+		const at = Date.now() - 500;
+		const ok = await run("exec", () => post(`/api/places/${place.key}/action`, { action: "exec", code }));
+		if (ok) setSentAt(at);
+	};
+
+	const result = sentAt ? lines.filter((line) => line.t >= sentAt && line.context === "Edit") : [];
 
 	return html`<section class="panel">
 		<div class="panel-head">
 			<div>
 				<h2>Run in Studio</h2>
-				<p>Runs Luau in the connected Studio (edit mode), like the command bar. Output shows in Studio's Output window.</p>
+				<p>Runs Luau in the connected Studio (edit mode), like the command bar. Its output shows right below.</p>
 			</div>
 			<span class=${`badge ${live ? "ok" : ""}`}>${live ? "Studio connected" : "No Studio syncing"}</span>
 		</div>
@@ -131,6 +140,11 @@ function RunCode({ place }) {
 				<${Button} className="primary" icon="play" busy=${busy === "exec"} disabled=${!live} onClick=${exec}>Run<//>
 			</div>
 		</div>
+		${sentAt
+			? html`<div style="padding:0 16px 16px">
+					<${OutputLines} place=${place} state=${state} lines=${result} compact=${true} />
+				</div>`
+			: null}
 	</section>`;
 }
 
@@ -162,6 +176,11 @@ export function Place({ state, params }) {
 
 	const setTab = (next) => go(`#/place/${place.key}/${next}`);
 
+	// The editor picked in Settings, else the first one installed
+	const preferred = state.prefs.externalEditor;
+	const external = state.editors.find((e) => e.id === preferred) || (preferred === "builtin" ? state.editors[0] : null) || null;
+	const problems = (place.problems || []).length;
+
 	return html`<div class="page">
 		<a href="#/" class="faint" style="display:inline-flex;align-items:center;gap:4px"><${Icon} name="back" />Places</a>
 
@@ -187,6 +206,15 @@ export function Place({ state, params }) {
 					${place.project
 						? html`
 								<${Button} icon="folder" onClick=${() => action("openFolder")}>Folder<//>
+								${external
+									? html`<${Button}
+											icon="external"
+											title=${`Open the project in ${external.name}`}
+											onClick=${() => post(`/api/places/${place.key}/open`, { editor: external.id }).catch((e) => toast(e.message, "err"))}
+										>
+											${external.name}
+										<//>`
+									: null}
 								<${Button} icon="code" onClick=${() => go(`#/editor/${place.key}`)}>Code<//>
 							`
 						: html`<${Button} className="primary" icon="folder" onClick=${() => go(`#/setup/${place.key}`)}>Map folder<//>`}
@@ -201,11 +229,16 @@ export function Place({ state, params }) {
 			<div class="tabs" role="tablist">
 				${[
 					["overview", "Overview"],
+					["activity", "Activity", place.lastActivity && Date.now() - place.lastActivity.t < 4000 ? html`<span class="tab-pulse"></span>` : null],
+					["output", "Output", place.outputErrors ? html`<span class="tab-count err">${place.outputErrors}</span>` : null],
+					["problems", "Problems", problems ? html`<span class="tab-count warn">${problems}</span>` : null],
+					["history", "History"],
+					["run", "Run code"],
 					["sync", "Sync"],
 					["studio", "Studio settings"],
-					["run", "Run code"],
 				].map(
-					([id, label]) => html`<button type="button" role="tab" aria-selected=${tab === id ? "true" : "false"} onClick=${() => setTab(id)}>${label}</button>`,
+					([id, label, extra]) =>
+						html`<button type="button" role="tab" aria-selected=${tab === id ? "true" : "false"} onClick=${() => setTab(id)}>${label}${extra || null}</button>`,
 				)}
 			</div>
 			<div class="toolbar">
@@ -218,7 +251,11 @@ export function Place({ state, params }) {
 
 		${tab === "overview" ? html`<${Overview} place=${place} />` : null}
 		${tab === "studio" ? html`<${StudioSettings} place=${place} state=${state} />` : null}
-		${tab === "run" ? html`<${RunCode} place=${place} />` : null}
+		${tab === "run" ? html`<${RunCode} place=${place} state=${state} />` : null}
+		${tab === "activity" ? html`<${ActivityPanel} place=${place} state=${state} />` : null}
+		${tab === "output" ? html`<${OutputPanel} place=${place} state=${state} />` : null}
+		${tab === "problems" ? html`<${ProblemsPanel} place=${place} state=${state} />` : null}
+		${tab === "history" ? (place.project ? html`<${HistoryPanel} place=${place} />` : html`<section class="panel"><div class="empty"><p>Map this place to a folder first.</p></div></section>`) : null}
 		${tab === "sync"
 			? html`<section class="panel">
 					<div class="setting">

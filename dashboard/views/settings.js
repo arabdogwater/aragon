@@ -239,6 +239,87 @@ function Plugin({ state }) {
 	</section>`;
 }
 
+function Updates({ state }) {
+	const [busy, run] = useAction();
+	const update = state.update;
+	const latest = update.latest;
+	const available = update.status === "available" && latest;
+
+	const check = () =>
+		run("check", async () => {
+			const result = await post("/api/update/check");
+			toast(result.status === "available" ? `Aragon ${result.latest.version} is available` : result.status === "error" ? result.error : "You're on the latest version");
+		});
+
+	return html`<section class="settings-section" id="updates">
+		<header>
+			<h2>Updates</h2>
+			<p>New versions show up in a corner card. One click downloads, verifies (SHA-256) and installs them, then Aragon restarts by itself and Studio reconnects.</p>
+		</header>
+		<div class="panel">
+			<div class="setting">
+				<div>
+					<b>Aragon ${update.current} ${available ? html`<span class="changed">${latest.version} available</span>` : null}</b>
+					<p>${update.lastCheck ? `Last checked ${ago(update.lastCheck)}` : "Not checked yet"}${update.status === "error" && update.error ? ` · ${update.error}` : ""}</p>
+				</div>
+				<div class="control">
+					${available
+						? html`<${Button} className="primary" icon="download" onClick=${() => run("install", () => post("/api/update/install"))}>Update to ${latest.version}<//>`
+						: null}
+					<${Button} icon="refresh" busy=${busy === "check" || update.status === "checking"} onClick=${check}>Check now<//>
+				</div>
+			</div>
+			<div class="setting">
+				<div>
+					<b>Check automatically</b>
+					<p>Looks for a new release every few hours. Nothing installs without your click.</p>
+				</div>
+				<${Switch}
+					label="Check for updates automatically"
+					checked=${state.prefs.checkUpdates}
+					onChange=${(v) => run("auto", () => post("/api/prefs", { checkUpdates: v }))}
+				/>
+			</div>
+		</div>
+	</section>`;
+}
+
+function Editors({ state }) {
+	const [busy, run] = useAction();
+	const editors = state.editors;
+	const current = state.prefs.externalEditor || "builtin";
+
+	return html`<section class="settings-section" id="editor">
+		<header>
+			<h2>Code editor</h2>
+			<p>
+				Where Studio's <i>Open In Editor</i>, error links in the Output and the command palette open files, at the right line.
+				Aragon found ${editors.length ? editors.map((e) => e.name).join(", ") : "no external editor"} on this PC.
+			</p>
+		</header>
+		<div class="panel">
+			<div class="setting">
+				<div>
+					<b>Open scripts in</b>
+					<p>Picking VS Code, Cursor or Windsurf opens the project's folder too, so the file lands in the right window.</p>
+				</div>
+				<div class="control">
+					<select
+						class="select"
+						value=${current}
+						aria-label="Open scripts in"
+						onChange=${(e) => run("editor", () => post("/api/prefs", { externalEditor: e.target.value }), "Saved")}
+					>
+						<option value="builtin">Aragon's built-in editor</option>
+						${editors.map((e) => html`<option value=${e.id}>${e.name}</option>`)}
+					</select>
+					<${Button} className="ghost icon" icon="refresh" aria-label="Look for editors again" title="Look for editors again" busy=${busy === "scan"} onClick=${() => run("scan", () => api("/api/editors"))} />
+				</div>
+			</div>
+		</div>
+	</section>`;
+}
+
 function Engine() {
 	const [config, setConfig] = useState(null);
 	const [filter, setFilter] = useState("");
@@ -320,6 +401,8 @@ export function Settings({ state, params }) {
 				<a href="#/settings/account">Roblox account</a>
 				<a href="#/settings/projects">Projects</a>
 				<a href="#/settings/plugin">Studio plugin</a>
+				<a href="#/settings/editor">Code editor</a>
+				<a href="#/settings/updates">Updates</a>
 				<a href="#/settings/engine">Sync engine</a>
 				<a href="#/settings/about">About</a>
 			</nav>
@@ -327,6 +410,8 @@ export function Settings({ state, params }) {
 				<${Account} state=${state} />
 				<${Projects} state=${state} />
 				<${Plugin} state=${state} />
+				<${Editors} state=${state} />
+				<${Updates} state=${state} />
 				<${Engine} />
 				<section class="settings-section" id="about">
 					<header>

@@ -373,6 +373,7 @@ dependencies = [
  "rbx_reflection",
  "rbx_reflection_database",
  "rbx_xml",
+ "regex",
  "reqwest 0.12.28",
  "rfd",
  "rmp-serde",
@@ -381,6 +382,7 @@ dependencies = [
  "self_update",
  "serde",
  "serde_json",
+ "sha2",
  "tao",
  "toml 0.9.12+spec-1.1.0",
  "toml2lua",
@@ -394,6 +396,7 @@ dependencies = [
  "winsafe",
  "wry",
  "yaml2lua",
+ "zip",
 ]
 
 [[package]]

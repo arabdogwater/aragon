@@ -40,11 +40,14 @@ use crate::{
 
 pub mod analytics;
 pub mod api;
+pub mod editors;
+pub mod journal;
 pub mod roblox;
 pub mod secrets;
 pub mod settings;
 pub mod store;
 pub mod ui;
+pub mod update;
 pub mod window;
 
 /// Default hub port, the Studio connector knocks here
@@ -178,6 +181,9 @@ pub struct Hub {
 	open_request: Mutex<Option<Value>>,
 	studio_restart: Mutex<Option<String>>,
 	roblox: Roblox,
+	pub journal: Arc<journal::Journal>,
+	update: Mutex<update::UpdateState>,
+	editors: Mutex<Vec<editors::EditorInfo>>,
 }
 
 fn now_millis() -> i64 {
@@ -204,6 +210,9 @@ impl Hub {
 			open_request: Mutex::new(None),
 			studio_restart: Mutex::new(None),
 			roblox: Roblox::new(),
+			journal: journal::Journal::new(),
+			update: Mutex::new(update::UpdateState::new()),
+			editors: Mutex::new(Vec::new()),
 		})
 	}
 
@@ -252,6 +261,12 @@ impl Hub {
 	}
 
 	pub fn start_background(self: &Arc<Self>) {
+		self.journal.start(Arc::downgrade(self));
+		self.start_update_checks();
+
+		let detect = self.clone();
+		thread::spawn(move || detect.refresh_editors());
+
 		let hub = self.clone();
 
 		thread::Builder::new()
@@ -645,10 +660,37 @@ impl Hub {
 	}
 
 	/// Asks the dashboard to show a file in its editor and come to front
-	pub fn request_open(&self, key: &str, path: &str) {
+	pub fn refresh_editors(&self) -> Vec<editors::EditorInfo> {
+		let found = editors::detect();
+		*lock!(self.editors) = found.clone();
+		self.bump();
+		found
+	}
+
+	/// Opens a project file where the user codes: the built-in editor, or the external editor picked in
+	/// Settings (at the line, inside the project's window)
+	pub fn open_file(&self, key: &str, relative: &str, line: u32) {
+		let editor = self.store().prefs.external_editor.clone();
+
+		if editor != "builtin" {
+			if let Some(workspace) = self.workspace_of(key) {
+				let file = workspace.join(relative);
+
+				match editors::open(&editor, &workspace, Some(&file), Some(line.max(1))) {
+					Ok(()) => return,
+					Err(err) => warn!("Opening in {editor} failed, using the built-in editor: {err}"),
+				}
+			}
+		}
+
+		self.request_open(key, relative, line);
+	}
+
+	pub fn request_open(&self, key: &str, path: &str, line: u32) {
 		*lock!(self.open_request) = Some(json!({
 			"key": key,
 			"path": path,
+			"line": line,
 			"nonce": now_millis(),
 		}));
 
@@ -739,15 +781,22 @@ impl Hub {
 		let place = key.to_owned();
 		let root = workspace_dir.clone();
 
-		core.set_opener(Arc::new(move |path: &Path| {
+		core.set_opener(Arc::new(move |path: &Path, line: u32| {
 			if let Some(hub) = hub.upgrade() {
 				let relative = path
 					.strip_prefix(&root)
 					.unwrap_or(path)
 					.to_string_lossy()
 					.replace('\\', "/");
-				hub.request_open(&place, &relative);
+				hub.open_file(&place, &relative, line);
 			}
+		}));
+
+		// Safety net + live activity for this project
+		core.set_journal(Arc::new(journal::CoreJournal {
+			journal: self.journal.clone(),
+			key: key.to_owned(),
+			workspace: workspace_dir.clone(),
 		}));
 
 		if sourcemap || config.with_sourcemap {
@@ -1598,6 +1647,9 @@ impl Hub {
 					"syncedClients": synced.get(&place.key).copied().unwrap_or(0),
 					"resolving": place.place_id > 0 && place.universe_id.is_none(),
 					"score": place.stats.score(),
+					"problems": self.journal.problems(&place.key),
+					"lastActivity": self.journal.last_activity(&place.key),
+					"outputErrors": self.journal.recent_errors(&place.key),
 					"stats": {
 						"loc": place.stats.loc,
 						"files": place.stats.files,
@@ -1623,6 +1675,14 @@ impl Hub {
 			.collect();
 
 		let plugin_path = crate::util::get_plugin_path().ok();
+		let update = self.update_state();
+		let current_version = env!("CARGO_PKG_VERSION");
+
+		// After an update (or the first start of a version with notes), show what changed once
+		let whats_new = (store.prefs.welcomed && store.prefs.last_version.as_deref() != Some(current_version))
+			.then(|| update::changelog_section(current_version))
+			.flatten()
+			.map(|notes| json!({ "version": current_version, "notes": notes }));
 
 		json!({
 			"version": self.version(),
@@ -1637,6 +1697,16 @@ impl Hub {
 				"pluginInstalledVersion": crate::updater::get_status().ok().map(|status| status.plugin_version),
 				"studioRestart": lock!(self.studio_restart).clone(),
 			},
+			"update": {
+				"status": update.status,
+				"current": update.current,
+				"latest": update.latest,
+				"error": update.error,
+				"lastCheck": update.last_check,
+				"skipped": store.prefs.skipped_update,
+			},
+			"whatsNew": whats_new,
+			"editors": *lock!(self.editors),
 			"account": store.account.as_ref().map(|account| json!({
 				"user": account.user,
 				"avatarUrl": account.avatar_url,
@@ -1661,6 +1731,89 @@ impl Hub {
 				"global": store.plugin_settings,
 			},
 		})
+	}
+
+	/// Studio's Output, forwarded by the plugin (edit mode and playtests)
+	pub fn record_output(&self, place_id: u64, place_name: &str, context: &str, messages: Vec<journal::OutputMessage>) {
+		let key = place_key(place_id, place_name);
+
+		if !self.store().places.contains_key(&key) || messages.is_empty() {
+			return;
+		}
+
+		let workspace = self.workspace_of(&key);
+		let core = self.core_for(&key);
+		let resolve = |name: &str| core.as_ref().and_then(|core| core.resolve_instance_path(name));
+
+		self.journal
+			.add_output(&key, context, messages, workspace.as_deref(), &resolve);
+	}
+
+	/// Luau that selects, in Studio, every instance that maps to `relative` (duplicates included)
+	pub fn select_in_studio_code(&self, key: &str, relative: &str) -> Result<String> {
+		let core = self.core_for(key).context("No Studio is syncing this place right now")?;
+		let workspace = self.workspace_of(key).context("Place is not mapped")?;
+		let path = path_clean::clean(workspace.join(relative));
+
+		let chains: Vec<Vec<String>> = {
+			let tree = core.tree();
+			let ids = tree.get_ids(&path).cloned().unwrap_or_default();
+			let root = tree.root_ref();
+
+			ids.into_iter()
+				.map(|id| {
+					let mut chain = Vec::new();
+					let mut current = id;
+
+					while current != root {
+						let Some(instance) = tree.get_instance(current) else {
+							break;
+						};
+
+						chain.push(instance.name.clone());
+						current = instance.parent();
+
+						if current.is_none() {
+							break;
+						}
+					}
+
+					chain.reverse();
+					chain
+				})
+				.filter(|chain| !chain.is_empty())
+				.collect()
+		};
+
+		anyhow::ensure!(!chains.is_empty(), "Couldn't find what {relative} is in Studio");
+
+		let list = chains
+			.iter()
+			.map(|chain| {
+				let names: Vec<String> = chain.iter().map(|name| format!("{name:?}")).collect();
+				format!("{{ {} }}", names.join(", "))
+			})
+			.collect::<Vec<_>>()
+			.join(", ");
+
+		Ok(format!(
+			r#"local found = {{}}
+for _, path in {{ {list} }} do
+	local parents = {{ game }}
+	for _, name in path do
+		local nextParents = {{}}
+		for _, parent in parents do
+			for _, child in parent:GetChildren() do
+				if child.Name == name then table.insert(nextParents, child) end
+			end
+		end
+		parents = nextParents
+	end
+	for _, instance in parents do table.insert(found, instance) end
+end
+game:GetService("Selection"):Set(found)
+print(("Aragon selected %d instances that share one file ({relative}). Keep one, delete or rename the others."):format(#found))"#
+		))
 	}
 
 	pub fn start_server(self: &Arc<Self>) -> Result<()> {

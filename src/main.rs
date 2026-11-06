@@ -99,9 +99,16 @@ fn main() -> ExitCode {
 		Err(err) => warn!("Failed to verify Aragon installation: {err}"),
 	}
 
+	let is_dashboard = cli.is_dashboard();
+
 	let handle = thread::spawn(move || {
 		if !is_managed && config.check_updates {
-			match updater::check_for_updates(config.install_plugin, config.update_templates, !config.auto_update) {
+			match updater::check_for_updates(
+				config.install_plugin,
+				config.update_templates,
+				!config.auto_update,
+				!is_dashboard,
+			) {
 				Ok(()) => info!("Update check completed successfully!"),
 				Err(err) => warn!("Update check failed: {err}"),
 			}

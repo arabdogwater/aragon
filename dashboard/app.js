@@ -1,5 +1,5 @@
 import { html, render, useEffect, useState, useRef, useLayoutEffect } from "./vendor/preact-htm.js";
-import { useHub, useRoute, go, Toasts } from "./lib.js";
+import { useHub, useRoute, go, Toasts, setPendingLine } from "./lib.js";
 import { Icon } from "./ui.js";
 import { startBackground } from "./bg.js";
 import { Home } from "./views/home.js";
@@ -9,6 +9,8 @@ import { Editor } from "./views/editor.js";
 import { Settings } from "./views/settings.js";
 import { Onboarding } from "./views/onboarding.js";
 import { Welcome } from "./views/welcome.js";
+import { UpdateCard, WhatsNew } from "./views/updates.js";
+import { CommandPalette, openPalette } from "./views/palette.js";
 
 function Rail({ state, online, route }) {
 	const liveCount = state ? new Set(state.sessions.map((s) => s.placeKey)).size : 0;
@@ -37,6 +39,9 @@ function Rail({ state, online, route }) {
 				<span>Much sync. Very Roblox.</span>
 			</div>
 		</div>
+		<button type="button" class="rail-search" onClick=${() => openPalette()} title="Search places, files and actions">
+			<${Icon} name="search" /><span>Jump to…</span><kbd>Ctrl K</kbd>
+		</button>
 		<nav class="nav" aria-label="Main" ref=${nav}>
 			${pill ? html`<span class="nav-pill" style=${`--y:${pill.y}px;height:${pill.h}px`} aria-hidden="true"></span>` : null}
 			${link("home", "#/", "places", "Places", pending ? html`<span class="count" title="Places waiting for setup">${pending}</span>` : null)}
@@ -57,6 +62,11 @@ function Rail({ state, online, route }) {
 				${state && !state.hub.pluginInstalled
 					? html`<div class="hub-line"><span class="dot warn"></span><a href="#/settings/plugin">Install the Studio plugin</a></div>`
 					: null}
+				${state && state.update.status === "available" && state.update.latest
+					? html`<a class="hub-line update-pill" href="#/settings/updates"><span class="dot ok live"></span>Update to <b>${state.update.latest.version}</b></a>`
+					: state
+						? html`<div class="hub-line faint" style="font-size:12px">Aragon ${state.hub.version}</div>`
+						: null}
 			</div>
 			<a class="account-chip" href="#/settings/account">
 				${account && account.avatarUrl ? html`<img src=${account.avatarUrl} alt="" />` : html`<span class="avatar-fallback"></span>`}
@@ -101,6 +111,7 @@ function App() {
 		// Ignore a stale request that was already there when the app loaded
 		if (first && Date.now() - request.nonce > 10000) return;
 
+		setPendingLine(request.path, request.line);
 		go(`#/editor/${request.key}/${request.path}`);
 	}, [state && state.openRequest && state.openRequest.nonce]);
 
@@ -157,6 +168,9 @@ function App() {
 			? html`<${Welcome} state=${state} onFinish=${() => setWelcomeDone(true)} />`
 			: null}
 		${onboardingKey && (state.prefs.welcomed || welcomeDone) ? html`<${Onboarding} key=${onboardingKey} state=${state} placeKey=${onboardingKey} onMapping=${() => setPinnedKey(onboardingKey)} onClose=${closeOnboarding} />` : null}
+		${state && state.whatsNew && state.prefs.welcomed && !onboardingKey ? html`<${WhatsNew} key=${state.whatsNew.version} state=${state} />` : null}
+		${state ? html`<${UpdateCard} state=${state} />` : null}
+		${state ? html`<${CommandPalette} state=${state} />` : null}
 		<${Toasts} />
 	</div>`;
 }

@@ -42,6 +42,14 @@ pub struct Prefs {
 	pub template: String,
 	/// First-run welcome (plugin install, Studio restart) was completed
 	pub welcomed: bool,
+	/// Look for new Aragon releases every few hours
+	pub check_updates: bool,
+	/// A release the user said "later" to (the corner card stays away until a newer one)
+	pub skipped_update: Option<String>,
+	/// Version whose "What's new" was last seen
+	pub last_version: Option<String>,
+	/// Where Studio's "Open In Editor" and output links open: `builtin` or an editor id (`cursor`, `vscode`...)
+	pub external_editor: String,
 }
 
 impl Default for Prefs {
@@ -51,6 +59,10 @@ impl Default for Prefs {
 			focus_on_onboarding: true,
 			welcomed: false,
 			template: String::from("quick"),
+			check_updates: true,
+			skipped_update: None,
+			last_version: None,
+			external_editor: String::from("builtin"),
 		}
 	}
 }

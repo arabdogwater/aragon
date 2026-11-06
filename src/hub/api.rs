@@ -96,6 +96,31 @@ struct SyncedRequest {
 	place_key: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OutputRequest {
+	place_id: u64,
+	#[serde(default)]
+	place_name: String,
+	#[serde(default)]
+	context: String,
+	messages: Vec<super::journal::OutputMessage>,
+}
+
+/// Studio's Output window, forwarded by the plugin
+#[post("/hub/output")]
+async fn studio_output(request: MsgPack<OutputRequest>, hub: HubData) -> impl Responder {
+	let hub = hub.get_ref().clone();
+	let request = request.0;
+
+	let record = move || hub.record_output(request.place_id, &request.place_name, &request.context, request.messages);
+
+	match blocking(record).await {
+		Ok(()) => HttpResponse::Ok().body("Recorded"),
+		Err(response) => response,
+	}
+}
+
 // Dashboard: state //////////////////////////////////////////////////////////
 
 #[derive(Deserialize)]
@@ -430,6 +455,397 @@ async fn place_action(key: UrlPath<String>, request: Json<ActionRequest>, hub: H
 	}
 }
 
+// Dashboard: activity, output, problems, history ///////////////////////////
+
+#[get("/api/places/{key}/activity")]
+async fn place_activity(key: UrlPath<String>, hub: HubData) -> impl Responder {
+	HttpResponse::Ok().json(hub.journal.activity(&key))
+}
+
+#[derive(Deserialize)]
+struct SinceQuery {
+	since: Option<u64>,
+}
+
+#[get("/api/places/{key}/output")]
+async fn place_output(key: UrlPath<String>, query: Query<SinceQuery>, hub: HubData) -> impl Responder {
+	HttpResponse::Ok().json(hub.journal.output(&key, query.since.unwrap_or(0)))
+}
+
+#[post("/api/places/{key}/output/clear")]
+async fn clear_output(key: UrlPath<String>, hub: HubData) -> impl Responder {
+	hub.journal.clear_output(&key);
+	ok()
+}
+
+#[derive(Deserialize)]
+struct DismissRequest {
+	id: Option<String>,
+}
+
+#[post("/api/places/{key}/problems/dismiss")]
+async fn dismiss_problem(key: UrlPath<String>, request: Json<DismissRequest>, hub: HubData) -> impl Responder {
+	hub.journal.dismiss_problem(&key, request.id.as_deref());
+	ok()
+}
+
+#[derive(Deserialize)]
+struct FixRequest {
+	action: String,
+	arg: Option<String>,
+}
+
+/// The one-click fixes problem cards offer
+#[post("/api/places/{key}/fix")]
+async fn fix_problem(key: UrlPath<String>, request: Json<FixRequest>, hub: HubData) -> impl Responder {
+	let hub = hub.get_ref().clone();
+	let key = key.into_inner();
+	let request = request.into_inner();
+
+	let result = blocking(move || -> Result<Value> {
+		match request.action.as_str() {
+			"reconnect" => {
+				hub.journal.dismiss_problem(&key, None);
+				hub.reconnect(&key, "Reconnecting to fix sync problems");
+			}
+			"wally" => {
+				let workspace = hub.workspace_of(&key).ok_or_else(|| anyhow::anyhow!("Place is not mapped"))?;
+
+				Program::new(ProgramName::Wally)
+					.message("Failed to run Wally")
+					.current_dir(&workspace)
+					.arg("install")
+					.output()?;
+
+				hub.reconnect(&key, "Wally packages installed");
+			}
+			"openFile" => {
+				let file = request.arg.unwrap_or_default();
+				hub.open_file(&key, &file, 1);
+			}
+			"openFolder" => {
+				open::that(hub.workspace_of(&key).ok_or_else(|| anyhow::anyhow!("Place is not mapped"))?)?;
+			}
+			"selectInStudio" => {
+				let code = hub.select_in_studio_code(&key, &request.arg.unwrap_or_default())?;
+				let core = hub
+					.core_for(&key)
+					.ok_or_else(|| anyhow::anyhow!("No Studio is syncing this place right now"))?;
+
+				core.queue().push(ExecuteCode { code }, None)?;
+			}
+			other => anyhow::bail!("Unknown fix {other}"),
+		}
+
+		Ok(json!({ "ok": true }))
+	})
+	.await;
+
+	match result {
+		Ok(Ok(value)) => HttpResponse::Ok().json(value),
+		Ok(Err(err)) => error(err),
+		Err(response) => response,
+	}
+}
+
+#[get("/api/places/{key}/history")]
+async fn place_history(key: UrlPath<String>, hub: HubData) -> impl Responder {
+	let hub = hub.get_ref().clone();
+
+	match blocking(move || hub.journal.history(&key)).await {
+		Ok(history) => HttpResponse::Ok().json(history),
+		Err(response) => response,
+	}
+}
+
+#[get("/api/places/{key}/history/{id}")]
+async fn history_entry(path: UrlPath<(String, String)>, hub: HubData) -> impl Responder {
+	let (key, id) = path.into_inner();
+	let hub = hub.get_ref().clone();
+
+	let result = blocking(move || -> Result<Value> {
+		let (entry, bytes) = hub
+			.journal
+			.history_blob(&key, &id)
+			.ok_or_else(|| anyhow::anyhow!("That copy is gone (copies are kept for 14 days)"))?;
+
+		let current = hub
+			.workspace_of(&key)
+			.map(|w| w.join(&entry.path))
+			.and_then(|path| fs::read(path).ok());
+
+		let text = String::from_utf8(bytes).ok();
+		let current_text = current.as_ref().and_then(|bytes| String::from_utf8(bytes.clone()).ok());
+
+		Ok(json!({
+			"entry": entry,
+			"binary": text.is_none(),
+			"content": text,
+			"exists": current.is_some(),
+			"current": current_text,
+		}))
+	})
+	.await;
+
+	match result {
+		Ok(Ok(value)) => HttpResponse::Ok().json(value),
+		Ok(Err(err)) => error(err),
+		Err(response) => response,
+	}
+}
+
+#[derive(Deserialize)]
+struct RestoreRequest {
+	ids: Vec<String>,
+}
+
+/// Puts kept copies back on disk; the sync sends them to Studio. Whatever they replace is kept too, so a
+/// restore can itself be undone
+#[post("/api/places/{key}/history/restore")]
+async fn restore_history(key: UrlPath<String>, request: Json<RestoreRequest>, hub: HubData) -> impl Responder {
+	let hub = hub.get_ref().clone();
+	let key = key.into_inner();
+	let ids = request.into_inner().ids;
+
+	let result = blocking(move || -> Result<usize> {
+		let workspace = hub.workspace_of(&key).ok_or_else(|| anyhow::anyhow!("Place is not mapped"))?;
+		let mut restored = 0;
+
+		for id in ids {
+			let Some((entry, bytes)) = hub.journal.history_blob(&key, &id) else {
+				continue;
+			};
+
+			let path = workspace.join(&entry.path);
+			anyhow::ensure!(is_inside(&workspace, &path), "A copy points outside the project folder");
+
+			if path.exists() {
+				hub.journal.backup(&key, &workspace, &path, "replaced by restore");
+			}
+
+			if let Some(parent) = path.parent() {
+				fs::create_dir_all(parent)?;
+			}
+
+			fs::write(&path, bytes)?;
+			restored += 1;
+		}
+
+		Ok(restored)
+	})
+	.await;
+
+	match result {
+		Ok(Ok(restored)) => HttpResponse::Ok().json(json!({ "ok": true, "restored": restored })),
+		Ok(Err(err)) => error(err),
+		Err(response) => response,
+	}
+}
+
+// Dashboard: updates ////////////////////////////////////////////////////////
+
+#[get("/api/update")]
+async fn get_update(hub: HubData) -> impl Responder {
+	HttpResponse::Ok().json(hub.update_state())
+}
+
+#[post("/api/update/check")]
+async fn check_update(hub: HubData) -> impl Responder {
+	let hub = hub.get_ref().clone();
+
+	let check = move || {
+		hub.check_for_update();
+		hub.update_state()
+	};
+
+	match blocking(check).await {
+		Ok(update) => HttpResponse::Ok().json(update),
+		Err(response) => response,
+	}
+}
+
+#[post("/api/update/install")]
+async fn install_update(hub: HubData) -> impl Responder {
+	match hub.get_ref().install_update() {
+		Ok(()) => ok(),
+		Err(err) => error(err),
+	}
+}
+
+#[derive(Deserialize)]
+struct SkipRequest {
+	version: Option<String>,
+}
+
+#[post("/api/update/skip")]
+async fn skip_update(request: Json<SkipRequest>, hub: HubData) -> impl Responder {
+	hub.store().prefs.skipped_update.clone_from(&request.version);
+	hub.save();
+	hub.bump();
+	ok()
+}
+
+// Dashboard: editors & quick open ///////////////////////////////////////////
+
+#[get("/api/editors")]
+async fn get_editors(hub: HubData) -> impl Responder {
+	let hub = hub.get_ref().clone();
+
+	match blocking(move || hub.refresh_editors()).await {
+		Ok(editors) => HttpResponse::Ok().json(editors),
+		Err(response) => response,
+	}
+}
+
+#[derive(Deserialize)]
+struct OpenInRequest {
+	/// File relative to the project; the project folder when missing
+	path: Option<String>,
+	line: Option<u32>,
+	/// Editor id; the one picked in Settings when missing
+	editor: Option<String>,
+}
+
+#[post("/api/places/{key}/open")]
+async fn open_in_editor(key: UrlPath<String>, request: Json<OpenInRequest>, hub: HubData) -> impl Responder {
+	let hub = hub.get_ref().clone();
+	let key = key.into_inner();
+	let request = request.into_inner();
+
+	let result = blocking(move || -> Result<()> {
+		let workspace = hub.workspace_of(&key).ok_or_else(|| anyhow::anyhow!("Place is not mapped"))?;
+
+		match (request.editor, request.path) {
+			(Some(editor), path) => {
+				let file = path.map(|p| workspace.join(p));
+
+				if let Some(file) = &file {
+					anyhow::ensure!(is_inside(&workspace, file), "Path escapes the project folder");
+				}
+
+				super::editors::open(&editor, &workspace, file.as_deref(), request.line)
+			}
+			(None, Some(path)) => {
+				hub.open_file(&key, &path, request.line.unwrap_or(1));
+				Ok(())
+			}
+			(None, None) => {
+				let editor = hub.store().prefs.external_editor.clone();
+				anyhow::ensure!(editor != "builtin", "Pick your editor in Settings first");
+				super::editors::open(&editor, &workspace, None, None)
+			}
+		}
+	})
+	.await;
+
+	match result {
+		Ok(Ok(())) => ok(),
+		Ok(Err(err)) => error(err),
+		Err(response) => response,
+	}
+}
+
+#[derive(Deserialize)]
+struct FilesQuery {
+	q: String,
+}
+
+const SKIP_DIRS: [&str; 9] = [
+	".git",
+	"node_modules",
+	"Packages",
+	"ServerPackages",
+	"DevPackages",
+	".aragon",
+	"build",
+	"target",
+	".vscode",
+];
+
+fn collect_files(root: &Path, dir: &Path, out: &mut Vec<String>) {
+	if out.len() > 20_000 {
+		return;
+	}
+
+	for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+		let path = entry.path();
+		let name = entry.file_name().to_string_lossy().to_string();
+
+		if path.is_dir() {
+			if !SKIP_DIRS.contains(&name.as_str()) {
+				collect_files(root, &path, out);
+			}
+		} else if let Ok(relative) = path.strip_prefix(root) {
+			out.push(relative.to_string_lossy().replace('\\', "/"));
+		}
+	}
+}
+
+/// Fuzzy subsequence score, higher is better; file-name hits beat folder hits
+fn fuzzy_score(query: &str, path: &str) -> Option<i64> {
+	let lower = path.to_lowercase();
+	let name_start = lower.rfind('/').map_or(0, |i| i + 1);
+	let name = &lower[name_start..];
+
+	if name.contains(query) {
+		return Some(1000 - path.len() as i64 + if name.starts_with(query) { 500 } else { 0 });
+	}
+
+	if lower.contains(query) {
+		return Some(500 - path.len() as i64);
+	}
+
+	let mut score = 0;
+	let mut chars = lower.char_indices();
+
+	for wanted in query.chars() {
+		let (index, _) = chars.find(|(_, c)| *c == wanted)?;
+		score += if index >= name_start { 3 } else { 1 };
+	}
+
+	Some(score - path.len() as i64 / 4)
+}
+
+/// Quick open across every mapped project (command palette)
+#[get("/api/files")]
+async fn search_files(query: Query<FilesQuery>, hub: HubData) -> impl Responder {
+	let hub = hub.get_ref().clone();
+	let q = query.q.trim().to_lowercase();
+
+	let search = move || {
+		let places: Vec<(String, String, PathBuf)> = hub
+			.store()
+			.places
+			.values()
+			.filter_map(|place| {
+				let workspace = place.project.as_ref()?.get_parent().to_owned();
+				Some((place.key.clone(), place.name.clone(), workspace))
+			})
+			.collect();
+
+		let mut hits: Vec<(i64, Value)> = Vec::new();
+
+		for (key, name, workspace) in places {
+			let mut files = Vec::new();
+			collect_files(&workspace, &workspace, &mut files);
+
+			for file in files {
+				if let Some(score) = fuzzy_score(&q, &file) {
+					hits.push((score, json!({ "key": key, "place": name, "path": file })));
+				}
+			}
+		}
+
+		hits.sort_by(|a, b| b.0.cmp(&a.0));
+		hits.into_iter().take(40).map(|(_, hit)| hit).collect::<Vec<_>>()
+	};
+
+	match blocking(search).await {
+		Ok(hits) => HttpResponse::Ok().json(hits),
+		Err(response) => response,
+	}
+}
+
 // Dashboard: project files (built-in editor) ////////////////////////////////
 
 const HIDDEN_DIRS: [&str; 5] = [".git", "node_modules", "Packages", "ServerPackages", "DevPackages"];
@@ -667,6 +1083,9 @@ struct PrefsRequest {
 	focus_on_onboarding: Option<bool>,
 	template: Option<String>,
 	welcomed: Option<bool>,
+	check_updates: Option<bool>,
+	last_version: Option<String>,
+	external_editor: Option<String>,
 }
 
 #[post("/api/prefs")]
@@ -692,6 +1111,18 @@ async fn set_prefs(request: Json<PrefsRequest>, hub: HubData) -> impl Responder 
 
 		if let Some(welcomed) = request.welcomed {
 			store.prefs.welcomed = welcomed;
+		}
+
+		if let Some(check_updates) = request.check_updates {
+			store.prefs.check_updates = check_updates;
+		}
+
+		if let Some(version) = &request.last_version {
+			store.prefs.last_version = Some(version.clone());
+		}
+
+		if let Some(editor) = &request.external_editor {
+			store.prefs.external_editor.clone_from(editor);
 		}
 	}
 
@@ -784,6 +1215,7 @@ async fn open_target(request: Json<OpenRequest>) -> impl Responder {
 	let allowed = target.starts_with("https://create.roblox.com/")
 		|| target.starts_with("https://www.roblox.com/")
 		|| target.starts_with("https://argon.wiki/")
+		|| target.starts_with("https://github.com/arabdogwater/")
 		|| Path::new(target).is_dir();
 
 	if !allowed {
@@ -813,6 +1245,22 @@ pub fn run(hub: Arc<Hub>) -> Result<()> {
 				.service(poll)
 				.service(bye)
 				.service(synced)
+				.service(studio_output)
+				.service(place_activity)
+				.service(place_output)
+				.service(clear_output)
+				.service(dismiss_problem)
+				.service(fix_problem)
+				.service(place_history)
+				.service(history_entry)
+				.service(restore_history)
+				.service(get_update)
+				.service(check_update)
+				.service(install_update)
+				.service(skip_update)
+				.service(get_editors)
+				.service(open_in_editor)
+				.service(search_files)
 				.service(ping)
 				.service(state)
 				.service(focus)

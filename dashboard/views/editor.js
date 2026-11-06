@@ -1,12 +1,12 @@
 import { html, useState, useEffect, useRef, useCallback } from "../vendor/preact-htm.js";
-import { api, go, useAction, toast } from "../lib.js";
+import { api, go, post, useAction, toast, takePendingLine } from "../lib.js";
 import { Icon, Button, Thumb } from "../ui.js";
 
 // Monaco comes from the CDN; when offline the editor falls back to a plain textarea
 const MONACO = "https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min";
 let monacoPromise = null;
 
-function loadMonaco() {
+export function loadMonaco() {
 	if (monacoPromise) return monacoPromise;
 
 	monacoPromise = new Promise((resolve, reject) => {
@@ -50,7 +50,7 @@ function loadMonaco() {
 	return monacoPromise;
 }
 
-function languageOf(path) {
+export function languageOf(path) {
 	if (/\.(luau|lua)$/.test(path)) return "lua";
 	if (/\.(ts|tsx)$/.test(path)) return "typescript";
 	if (/\.json$/.test(path)) return "json";
@@ -197,6 +197,7 @@ export function Editor({ state, params }) {
 				editor.current.setModel(model);
 				if (old) old.dispose();
 				setDirty(false);
+				revealPending();
 			},
 			() => setFallback(true),
 		);
@@ -205,6 +206,34 @@ export function Editor({ state, params }) {
 			disposed = true;
 		};
 	}, [file, fallback]);
+
+	// Errors in the output, Studio's "Open In Editor" and the palette open files at a line
+	const decorations = useRef([]);
+
+	function revealPending() {
+		if (!editor.current || !file) return;
+
+		const line = takePendingLine(file.path);
+		if (!line) return;
+
+		editor.current.revealLineInCenter(line);
+		editor.current.setPosition({ lineNumber: line, column: 1 });
+		editor.current.focus();
+
+		decorations.current = editor.current.deltaDecorations(decorations.current, [
+			{ range: { startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: 1 }, options: { isWholeLine: true, className: "line-flash" } },
+		]);
+
+		setTimeout(() => {
+			if (editor.current) decorations.current = editor.current.deltaDecorations(decorations.current, []);
+		}, 2200);
+	}
+
+	useEffect(() => {
+		const onLine = () => revealPending();
+		addEventListener("aragon-line", onLine);
+		return () => removeEventListener("aragon-line", onLine);
+	}, [file]);
 
 	useEffect(
 		() => () => {
@@ -318,6 +347,20 @@ export function Editor({ state, params }) {
 						<div class="code-bar">
 							${file
 								? html`<span class="path mono">${file.path}${dirty ? " ●" : ""}</span>
+										${state.editors.length
+											? html`<${Button}
+													className="ghost sm"
+													icon="external"
+													title="Open this file in your editor"
+													onClick=${() => {
+														const preferred = state.editors.find((e) => e.id === state.prefs.externalEditor) || state.editors[0];
+														const line = editor.current && editor.current.getPosition() ? editor.current.getPosition().lineNumber : 1;
+														post(`/api/places/${place.key}/open`, { editor: preferred.id, path: file.path, line }).catch((e) => toast(e.message, "err"));
+													}}
+												>
+													${(state.editors.find((e) => e.id === state.prefs.externalEditor) || state.editors[0]).name}
+												<//>`
+											: null}
 										<${Button} className="ghost sm icon" icon="trash" aria-label="Delete file" title="Move to Recycle Bin" onClick=${remove} />
 										<${Button} className="primary sm" icon="save" busy=${busy === "save"} disabled=${!dirty} onClick=${save}>Save<//>`
 								: html`<span class="path">Pick a file. Ctrl S saves and syncs to Studio.</span>`}

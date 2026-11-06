@@ -45,8 +45,11 @@ impl Processor {
 		let handler = handler.clone();
 		let (sender, receiver) = crossbeam_channel::unbounded();
 
+		// The project path in the name lets the hub tell which place a warning from this thread is about
+		let name = format!("processor|{}", lock!(handler.project).path.display());
+
 		Builder::new()
-			.name("processor".into())
+			.name(name)
 			.spawn(move || -> Result<()> {
 				let vfs_receiver = vfs.receiver();
 				let client_receiver = receiver;
@@ -128,6 +131,7 @@ impl Handler {
 
 		if !changes.is_empty() {
 			stats::files_synced(changes.total() as u32);
+			self.vfs.journal_incoming(path, changes.total());
 
 			let result = self.queue.push(server::SyncChanges(changes), None);
 

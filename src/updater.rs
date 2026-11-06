@@ -172,20 +172,17 @@ fn update_templates(status: &mut UpdateStatus, prompt: bool, force: bool) -> Res
 	Ok(false)
 }
 
-pub fn check_for_updates(plugin: bool, templates: bool, prompt: bool) -> Result<()> {
+/// `cli`: also look online for a newer Aragon. The hub (dashboard) has its own updater with a progress card,
+/// so it passes `false`
+pub fn check_for_updates(plugin: bool, templates: bool, prompt: bool, cli: bool) -> Result<()> {
 	let mut status = get_status()?;
 
 	if UPDATE_FORCED.is_completed() {
 		return Ok(());
 	}
 
-	if status.last_checked.elapsed()?.as_secs() < 3600 {
-		debug!("Update check already performed within the last hour");
-		return Ok(());
-	}
-
-	update_cli(prompt, false)?;
-
+	// The bundled plugin and templates are local: always check them. Throttling them with the online check
+	// meant a freshly updated Aragon could keep the old Studio plugin for up to an hour
 	if plugin {
 		update_plugin(&mut status, prompt, false)?;
 	}
@@ -194,7 +191,15 @@ pub fn check_for_updates(plugin: bool, templates: bool, prompt: bool) -> Result<
 		update_templates(&mut status, prompt, false)?;
 	}
 
-	status.last_checked = SystemTime::now();
+	if cli {
+		if status.last_checked.elapsed().map_or(true, |elapsed| elapsed.as_secs() >= 3600) {
+			update_cli(prompt, false)?;
+			status.last_checked = SystemTime::now();
+		} else {
+			debug!("Online update check already performed within the last hour");
+		}
+	}
+
 	set_status(&status)?;
 
 	Ok(())

@@ -1,5 +1,5 @@
 import { html, useState, useMemo, useEffect, useRef } from "../vendor/preact-htm.js";
-import { go, post, fmt, fmtMinutes, ago, series, sum, placeStatus, useAction, toast, dayKey } from "../lib.js";
+import { go, post, fmt, fmtMinutes, ago, agoMs, series, sum, placeStatus, useAction, toast, dayKey } from "../lib.js";
 import { Icon, Thumb, Seg, Copyable, Sparkline, Button } from "../ui.js";
 import { CountUp, useTilt } from "../motion.js";
 
@@ -150,6 +150,14 @@ function LiveStrip({ state }) {
 					<div class="meta">
 						<b>${(place && place.name) || session.placeName}</b>
 						<small><span class=${`dot ${status.kind} live`}></span>${status.label}</small>
+						${place && place.lastActivity
+							? html`<small class="live-activity" title=${place.lastActivity.path}>
+									${place.lastActivity.dir === "toStudio" ? "→ Studio" : "→ disk"} ${place.lastActivity.path.split("/").pop()} · ${agoMs(place.lastActivity.t)}
+								</small>`
+							: null}
+						${place && (place.problems || []).length
+							? html`<small class="live-problem" onClick=${(e) => (e.stopPropagation(), go(`#/place/${place.key}/problems`))}>⚠ ${place.problems.length} sync problem${place.problems.length === 1 ? "" : "s"}</small>`
+							: null}
 					</div>
 					${needs ? html`<span class="btn primary sm">Set up</span>` : html`<${Icon} name="chevron" style="transform:rotate(-90deg)" />`}
 				</button>`;
@@ -234,6 +242,14 @@ function PlaceRow({ place, sessions, root, index }) {
 				${place.name || "Untitled place"}
 				${!place.isRoot && place.gameName ? html`<span class="faint">· ${place.gameName}</span>` : null}
 				${place.privacy === "Private" ? html`<span class="badge">Private</span>` : null}
+				${(place.problems || []).length
+					? html`<span
+							class="badge warn"
+							title="Sync problems, click to see them"
+							onClick=${(e) => (e.stopPropagation(), go(`#/place/${place.key}/problems`))}
+						>⚠ ${place.problems.length}</span>`
+					: null}
+				${place.outputErrors ? html`<span class="badge err" title="Errors in Studio's output, last 10 minutes">${place.outputErrors} error${place.outputErrors === 1 ? "" : "s"}</span>` : null}
 			</b>
 			<div class="ids">
 				${place.placeId ? html`<${Copyable} value=${place.placeId}>place ${place.placeId}<//>` : html`<span class="mono">local file</span>`}
@@ -315,9 +331,12 @@ export function Home({ state }) {
 	const [busy, run] = useAction();
 	const searchRef = useRef(null);
 
+	// "/" focuses the search (Ctrl K is the command palette, everywhere)
 	useEffect(() => {
 		const onKey = (e) => {
-			if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+			const typing = /input|textarea|select/i.test(document.activeElement && document.activeElement.tagName);
+
+			if (e.key === "/" && !typing) {
 				e.preventDefault();
 				searchRef.current && searchRef.current.focus();
 			}
@@ -375,7 +394,7 @@ export function Home({ state }) {
 						onInput=${(e) => setQuery(e.target.value)}
 						aria-label="Search places"
 					/>
-					${query ? null : html`<kbd>Ctrl K</kbd>`}
+					${query ? null : html`<kbd>/</kbd>`}
 				</label>
 				<${Seg}
 					label="Filter places"

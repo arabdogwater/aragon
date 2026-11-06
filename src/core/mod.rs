@@ -27,7 +27,8 @@ pub mod snapshot;
 pub mod tree;
 
 /// Handles "open this file" requests from Studio (`OpenInEditor` setting)
-pub type Opener = Arc<dyn Fn(&Path) + Send + Sync>;
+/// Opens a synced file at a line (Studio's "Open In Editor"), instead of the OS default app
+pub type Opener = Arc<dyn Fn(&Path, u32) + Send + Sync>;
 
 pub struct Core {
 	opener: Mutex<Option<Opener>>,
@@ -237,7 +238,53 @@ impl Core {
 		*lock!(self.opener) = Some(opener);
 	}
 
-	pub fn open(&self, instance: Ref) -> Result<()> {
+	pub fn set_journal(&self, journal: Arc<dyn crate::vfs::VfsJournal>) {
+		self._vfs.set_journal(journal);
+	}
+
+	/// The file behind a Studio instance path like `ServerScriptService.Services.Shop` (as Studio prints it in
+	/// errors and stack traces). Names may contain dots, so every way of splitting the path is tried
+	pub fn resolve_instance_path(&self, full_name: &str) -> Option<PathBuf> {
+		fn walk(tree: &Tree, id: Ref, rest: &str) -> Option<Ref> {
+			if rest.is_empty() {
+				return Some(id);
+			}
+
+			let instance = tree.get_instance(id)?;
+
+			for child in instance.children() {
+				let Some(child_instance) = tree.get_instance(*child) else {
+					continue;
+				};
+
+				let name = child_instance.name.as_str();
+
+				if let Some(after) = rest.strip_prefix(name) {
+					if after.is_empty() {
+						return Some(*child);
+					}
+
+					if let Some(after) = after.strip_prefix('.') {
+						if let Some(found) = walk(tree, *child, after) {
+							return Some(found);
+						}
+					}
+				}
+			}
+
+			None
+		}
+
+		let tree = self.tree();
+		let path = full_name.strip_prefix("game.").unwrap_or(full_name);
+		let id = walk(&tree, tree.root_ref(), path)?;
+
+		let mut sources = tree.get_meta(id)?.source.relevant().to_owned();
+		sources.sort_by_key(|source| source.index());
+		sources.first().map(|source| source.path().to_owned())
+	}
+
+	pub fn open(&self, instance: Ref, line: u32) -> Result<()> {
 		let tree = self.tree();
 
 		let mut sources = if let Some(meta) = tree.get_meta(instance) {
@@ -252,7 +299,7 @@ impl Core {
 			let opener = lock!(self.opener).clone();
 
 			match opener {
-				Some(opener) => opener(source.path()),
+				Some(opener) => opener(source.path(), line),
 				None => open::that(source.path())?,
 			}
 
