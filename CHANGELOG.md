@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-11-07
+
+### Fixed
+
+- **Folders duplicated in Studio (`Data`, `Data`, `Modules`, `Modules`, ...).** With Two-way sync on, the plugin
+  treated an instance leaving its parent as deleted on the spot, and the same instance coming back as a brand new one
+  with a new ID. A script that swaps a folder for a fresh copy and puts the original back (or an undo + redo) sent
+  "remove old ID + add new ID" in one batch. The hub applied the add first and skipped it because the folder was
+  still on disk ("already exists! Skipping"), then applied the removal and **deleted the folder from disk**. Studio
+  kept the folder under an ID the hub never knew, so every edit to its scripts was dropped ("Attempted to update
+  instance that doesn't exist"), and putting the files back made the hub add the folder again: a twin in Studio.
+  Fixed in three places:
+  - The plugin decides a removal only when the batch is sent: an instance back under the same parent sends nothing,
+    one added and destroyed in the same batch cancels out, and a real move is sent as remove + add
+  - The hub applies Studio's removals before its additions, so replacing an instance (delete `X`, create a new `X`)
+    writes the new one instead of deleting both
+  - When the files add something Studio already has untracked (kept by Keep unknowns, restored by an undo), the
+    plugin adopts it instead of creating a second one, and applying the same instance twice (LiveHydrate fetching a
+    missing parent with its children) no longer duplicates the child that triggered it
+- A removed instance now stops being tracked together with its descendants. They stayed tracked before, so when it
+  came back its scripts were left out of what was sent to the hub
+- The Studio watcher dropped only the removed instance's listeners, not its descendants', so an instance that was
+  moved and came back reported every change twice
+
 ## [1.0.5] - 2026-10-17
 
 ### Fixed

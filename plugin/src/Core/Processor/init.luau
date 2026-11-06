@@ -119,6 +119,24 @@ function Processor:hydrate(snapshot: Types.Snapshot, instance: Instance)
 			end
 		end
 	end
+
+	-- Two Studio instances with the same name and class can't both live on disk: only the first one syncs, the other
+	-- is a leftover duplicate. Say so instead of leaving it silently out of sync
+	for index, child in children do
+		if hydrated[index] then
+			continue
+		end
+
+		for otherIndex, other in children do
+			if hydrated[otherIndex] and other.Name == child.Name and other.ClassName == child.ClassName then
+				Log.warn(
+					`Duplicate in Studio: {child:GetFullName()} ({child.ClassName}) exists twice, only one is synced.`
+						.. " Delete the copy you don't want"
+				)
+				break
+			end
+		end
+	end
 end
 
 function Processor:diff(snapshot: Types.Snapshot, parent: Types.Ref, clientPriority: boolean): Types.Changes

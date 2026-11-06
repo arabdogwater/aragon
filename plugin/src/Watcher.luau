@@ -30,7 +30,8 @@ type WatcherImpl = {
 	__unwatchTag: (self: Watcher, tag: string) -> (),
 	__onAdded: (self: Watcher, instance: Instance) -> (),
 	__onChanged: (self: Watcher, instance: Instance, property: string) -> (),
-	__onRemoved: (self: Watcher, instance: Instance) -> (),
+	__onRemoved: (self: Watcher, instance: Instance, parent: Instance) -> (),
+	__disconnect: (self: Watcher, instance: Instance) -> (),
 }
 
 local Watcher: WatcherImpl = {} :: WatcherImpl
@@ -130,7 +131,7 @@ function Watcher:__connectEvents(instance)
 	table.insert(
 		connections,
 		instance.ChildRemoved:Connect(function(child)
-			self:__onRemoved(child)
+			self:__onRemoved(child, instance)
 		end)
 	)
 
@@ -214,7 +215,7 @@ function Watcher:__onChanged(instance, property)
 	})
 end
 
-function Watcher:__onRemoved(instance)
+function Watcher:__disconnect(instance)
 	local connections = self.connections[instance]
 
 	if connections then
@@ -224,10 +225,21 @@ function Watcher:__onRemoved(instance)
 
 		self.connections[instance] = nil
 	end
+end
+
+function Watcher:__onRemoved(instance, parent)
+	-- The whole subtree leaves, not just its root: descendants kept their listeners before, and got a second set
+	-- when the instance came back (every change then reported twice)
+	self:__disconnect(instance)
+
+	for _, descendant in instance:GetDescendants() do
+		self:__disconnect(descendant)
+	end
 
 	self.signal:Fire({
 		kind = "Remove",
 		instance = instance,
+		parent = parent,
 	})
 end
 

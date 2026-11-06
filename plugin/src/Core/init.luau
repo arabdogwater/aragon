@@ -311,13 +311,78 @@ function Core:__startSyncLoop()
 	end)
 end
 
+-- Drops the added snapshot with this id, at the top or nested in another addition's children
+local function dropAddition(snapshots: { Types.AddedSnapshot }, id: Types.Ref): boolean
+	local strId = buffer.tostring(id)
+
+	for index, snapshot in snapshots do
+		if buffer.tostring(snapshot.id) == strId then
+			table.remove(snapshots, index)
+			return true
+		end
+
+		if snapshot.children and dropAddition(snapshot.children :: any, id) then
+			return true
+		end
+	end
+
+	return false
+end
+
 function Core:__startSyncbackLoop()
 	local aggregateChanges = Changes.new()
+
+	-- Instances that left their parent since the last flush, with the parent they left. A removal is only decided
+	-- when the batch is sent. Forgetting the ID right away turned "reparent out, then back" (a script swapping a
+	-- folder for a fresh copy and restoring it, an undo + redo) into remove(old ID) + add(new ID): the hub skipped the
+	-- add ("already exists"), then applied the removal and deleted the folder from disk, while Studio kept the folder
+	-- under an ID the hub never knew. Putting the files back made the hub add the folder again: a duplicate in Studio
+	local pendingRemovals: { [Instance]: Instance | false } = {}
+
+	local function settleRemovals(changes: Types.Changes)
+		for instance, oldParent in pendingRemovals do
+			if not self.tree:getId(instance) then
+				-- the server removed it in the meantime, nothing left to tell it
+				continue
+			end
+
+			local parent = instance.Parent
+
+			if parent ~= nil and parent == oldParent then -- (false never matches)
+				-- back where it was: the same instance, nothing to sync
+				continue
+			end
+
+			local id = self.processor.read:onRemove(instance) :: Types.Ref
+
+			-- added and gone within the same batch: the server never has to hear about it
+			if not dropAddition(changes.additions, id) then
+				changes:remove(id)
+			end
+
+			changes:removePrevious("updates", id)
+
+			-- moved under another synced parent: it lives on there
+			if parent and self.tree:getId(parent) then
+				local snapshot = self.processor.read:onAdd(instance)
+
+				if snapshot then
+					changes:add(snapshot)
+				end
+			end
+		end
+
+		table.clear(pendingRemovals)
+	end
 
 	return Promise.new(function(resolve)
 		task.spawn(function()
 			while self.status == Core.Status.Connected do
 				task.wait(SYNCBACK_RATE)
+
+				if next(pendingRemovals) then
+					settleRemovals(aggregateChanges)
+				end
 
 				if aggregateChanges:isEmpty() then
 					continue
@@ -359,10 +424,11 @@ function Core:__startSyncbackLoop()
 					changes:update(snapshot)
 				end
 			elseif kind == "Remove" then
-				local id = self.processor.read:onRemove(event.instance)
+				local instance = event.instance
 
-				if id then
-					changes:remove(id)
+				-- keep the first parent: the one the server knows
+				if self.tree:getId(instance) and pendingRemovals[instance] == nil then
+					pendingRemovals[instance] = event.parent or false
 				end
 			end
 

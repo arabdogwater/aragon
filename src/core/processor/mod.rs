@@ -215,6 +215,17 @@ impl Handler {
 		let total = changes.total();
 		let mut failed = 0;
 
+		// Removals first. Additions went first before, so a batch that replaces an instance (Studio deletes `X`
+		// and creates a new `X`, or a script swaps a folder for a copy) had its addition skipped because the path
+		// still existed ("already exists! Skipping"), then the removal deleted the files: the instance was gone
+		// from disk while Studio still had it, and the next write of those files duplicated it in Studio
+		for id in changes.removals {
+			if let Err(err) = write::apply_removal(id, &mut tree, &self.vfs) {
+				error!("Failed to remove {id:?}: {err:#}");
+				failed += 1;
+			}
+		}
+
 		for snapshot in changes.additions {
 			let name = snapshot.name.clone();
 
@@ -229,13 +240,6 @@ impl Handler {
 
 			if let Err(err) = write::apply_update(snapshot, &mut tree, &self.vfs) {
 				error!("Failed to update {id:?}: {err:#}");
-				failed += 1;
-			}
-		}
-
-		for id in changes.removals {
-			if let Err(err) = write::apply_removal(id, &mut tree, &self.vfs) {
-				error!("Failed to remove {id:?}: {err:#}");
 				failed += 1;
 			}
 		}

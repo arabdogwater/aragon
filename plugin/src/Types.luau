@@ -44,9 +44,11 @@ export type UpdatedSnapshot = {
 -- Other structs
 
 export type WatcherEvent = {
-	kind: "Added" | "Removed" | "Changed",
+	kind: "Add" | "Remove" | "Change",
 	instance: Instance,
 	property: string?,
+	-- Remove only: the parent it left (by then `instance.Parent` is already wherever it went)
+	parent: Instance?,
 }
 
 export type Changes = {

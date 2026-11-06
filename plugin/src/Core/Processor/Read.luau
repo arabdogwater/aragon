@@ -241,6 +241,12 @@ function ReadProcessor:onRemove(instance: Instance): Types.Ref?
 
 	self.tree:removeById(id)
 
+	-- Forget the synced descendants too. They stayed tracked before, so when the instance came back (an undo, a
+	-- script putting it back) onAdd skipped them as "already tracked": the server got the folder without its scripts
+	for _, descendant in instance:GetDescendants() do
+		self.tree:removeByInstance(descendant)
+	end
+
 	return id
 end
 

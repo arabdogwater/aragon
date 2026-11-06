@@ -69,6 +69,17 @@ local function findChild(parent: Instance, name: string, class: string): Instanc
 	return nil
 end
 
+-- An instance with this name and class under `parent` that Aragon doesn't track
+local function findUntrackedTwin(tree, parent: Instance, name: string, class: string): Instance?
+	for _, child in parent:GetChildren() do
+		if child.Name == name and child.ClassName == class and not tree:getId(child) then
+			return child
+		end
+	end
+
+	return nil
+end
+
 local function warnNotCreatable(class: string)
 	local err = Error.new(Error.NotCreatable, class)
 
@@ -183,6 +194,18 @@ function WriteProcessor:applyAddition(
 ): Instance?
 	Log.trace("Applying addition of", snapshot)
 
+	-- Already applied (LiveHydrate creates a missing parent WITH its children, then the child that triggered it
+	-- arrives on its own): creating it again was a duplicate
+	local existing = self.tree:getInstance(snapshot.id)
+
+	if existing then
+		if existing.Parent then
+			return existing
+		end
+
+		self.tree:removeById(snapshot.id)
+	end
+
 	local parent = self.tree:getInstance(snapshot.parent)
 
 	if not parent then
@@ -208,8 +231,18 @@ function WriteProcessor:applyAddition(
 	if skipExisting then
 		local instance = findChild(parent, snapshot.name, snapshot.class)
 
-		if instance then
+		if instance and self.tree:getId(instance) then
 			return instance
+		end
+	end
+
+	-- Studio already has it, untracked: kept by Keep unknowns after the files removed it, restored by an undo, left
+	-- over from an earlier session. Adopt it instead of creating a twin next to it
+	if parent ~= game and not snapshot.meta.meshSource then
+		local twin = findUntrackedTwin(self.tree, parent, snapshot.name, snapshot.class)
+
+		if twin then
+			return self:adoptInstance(twin, snapshot, initial)
 		end
 	end
 
@@ -272,6 +305,51 @@ function WriteProcessor:applyAddition(
 	for _, child in snapshot.children do
 		child.parent = snapshot.id
 		self:applyAddition(child, initial)
+	end
+
+	if not initial then
+		setWaypoint("Add", instance.Name)
+	end
+
+	return instance
+end
+
+-- Makes an existing Studio instance the synced one for `snapshot`: its properties from the files, its children
+-- adopted or created the same way. Children only Studio has stay unless Keep unknowns is off
+function WriteProcessor:adoptInstance(instance: Instance, snapshot: Types.AddedSnapshot, initial: boolean?): Instance
+	Log.info("Adopted", instance:GetFullName(), "(already in Studio, now synced again)")
+
+	for property, value in snapshot.properties do
+		local decodeSuccess, decodedValue = Dom.EncodedValue.decode(value)
+
+		if not decodeSuccess then
+			local err = Error.new(Error.DecodeFailed, property, value)
+			Log.warn(err)
+
+			continue
+		end
+
+		local writeSuccess, reason = Dom.writeProperty(instance, property, decodedValue)
+
+		if not writeSuccess then
+			local err = Error.new(Error.WriteFailed, property, instance, reason.kind)
+			Log.warn(err)
+		end
+	end
+
+	self.tree:insertInstance(instance, snapshot.id, snapshot.meta)
+
+	for _, child in snapshot.children do
+		child.parent = snapshot.id
+		self:applyAddition(child, initial)
+	end
+
+	if not (Config:get("KeepUnknowns") or snapshot.meta.keepUnknowns) then
+		for _, child in instance:GetChildren() do
+			if not self.tree:getId(child) and Dom.isCreatable(child.ClassName) then
+				child.Parent = nil
+			end
+		end
 	end
 
 	if not initial then
