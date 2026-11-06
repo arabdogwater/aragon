@@ -326,7 +326,15 @@ export function ProblemsPanel({ place, state }) {
 
 // History (safety net) -------------------------------------------------------------------
 
+const VERB = { delete: "Studio deleted", overwrite: "Studio overwrote" };
+
 function batchTitle(entries) {
+	// One file: name it
+	if (new Set(entries.map((e) => e.path)).size === 1) {
+		const entry = entries[0];
+		return `${VERB[entry.action] || "A restore replaced"} ${entry.path.split("/").pop()}`;
+	}
+
 	const deleted = entries.filter((e) => e.action === "delete").length;
 	const overwritten = entries.filter((e) => e.action === "overwrite").length;
 	const restored = entries.length - deleted - overwritten;
@@ -336,7 +344,7 @@ function batchTitle(entries) {
 	if (overwritten) parts.push(`overwrote ${overwritten} file${overwritten === 1 ? "" : "s"}`);
 	if (restored) parts.push(`${restored} replaced by a restore`);
 
-	return parts.join(", ");
+	return `Studio ${parts.join(", ")}`;
 }
 
 function when(t) {
@@ -415,7 +423,7 @@ function DiffDialog({ place, entry, onClose, onRestore }) {
 				<h2 class="mono" style="font-size:15px">${entry.path}</h2>
 			</div>
 			<div class="toolbar">
-				<span class="faint">Kept copy ← → ${data && !data.exists ? "file is gone now" : "file now"}</span>
+				<span class="faint">Left: the kept copy · Right: ${data && !data.exists ? "nothing (the file is gone)" : "the file now"}</span>
 				<${Button} className="primary" icon="refresh" onClick=${() => onRestore([entry])}>Restore this copy<//>
 				<${Button} className="ghost icon" icon="x" aria-label="Close" onClick=${onClose} />
 			</div>
@@ -504,7 +512,7 @@ export function HistoryPanel({ place }) {
 									<button type="button" class="batch-toggle" onClick=${() => setOpen({ ...open, [batch]: !expanded })}>
 										<${Icon} name="chevron" style=${expanded ? "" : "transform:rotate(-90deg)"} />
 										<b>${when(batch)}</b>
-										<span>Studio ${batchTitle(list)}</span>
+										<span>${batchTitle(list)}</span>
 									</button>
 									<${Button} className="sm" icon="refresh" busy=${busy === batch} onClick=${() => restore(list, batch)}>
 										${list.length > 1 ? `Restore all ${new Set(list.map((e) => e.path)).size}` : "Restore"}

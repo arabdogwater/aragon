@@ -1013,6 +1013,22 @@ impl VfsJournal for CoreJournal {
 	}
 
 	fn incoming(&self, path: &Path, _changes: usize) {
+		// Editors and AI agents save through temp files (`File.luau.tmp.123`, `~`, `.swp`): not worth a line
+		let name = path
+			.file_name()
+			.map(|n| n.to_string_lossy().to_lowercase())
+			.unwrap_or_default();
+		let temporary = name.contains(".tmp")
+			|| name.ends_with('~')
+			|| name.ends_with(".swp")
+			|| name.ends_with(".crswap")
+			|| name.starts_with(".#")
+			|| name.starts_with("~$");
+
+		if temporary {
+			return;
+		}
+
 		let kind = if path.exists() { "changed" } else { "removed" };
 
 		self.journal
