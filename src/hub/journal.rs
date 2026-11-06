@@ -298,7 +298,8 @@ impl Journal {
 
 			for regex in [&*LINE_REF, &*OLD_REF] {
 				for captures in regex.captures_iter(&message.text) {
-					let (Some(whole), Some(name), Some(line)) = (captures.get(0), captures.get(1), captures.get(2)) else {
+					let (Some(whole), Some(name), Some(line)) = (captures.get(0), captures.get(1), captures.get(2))
+					else {
 						continue;
 					};
 
@@ -352,7 +353,9 @@ impl Journal {
 	}
 
 	pub fn output(&self, key: &str, since: u64) -> Vec<OutputLine> {
-		self.with(key, |place| place.output.iter().filter(|line| line.id > since).cloned().collect())
+		self.with(key, |place| {
+			place.output.iter().filter(|line| line.id > since).cloned().collect()
+		})
 	}
 
 	pub fn clear_output(&self, key: &str) {
@@ -448,7 +451,11 @@ impl Journal {
 				.cloned()
 				.collect();
 
-			problems.sort_by(|a, b| (b.severity == "error").cmp(&(a.severity == "error")).then(b.last.cmp(&a.last)));
+			problems.sort_by(|a, b| {
+				(b.severity == "error")
+					.cmp(&(a.severity == "error"))
+					.then(b.last.cmp(&a.last))
+			});
 			problems
 		})
 	}
@@ -480,7 +487,11 @@ impl Journal {
 				text.push_str(&format!("\nFile: `{file}`\n"));
 			}
 
-			text.push_str(&format!("\nSeen {} time(s). Log line: `{}`\n\n", problem.count, problem.raw.trim()));
+			text.push_str(&format!(
+				"\nSeen {} time(s). Log line: `{}`\n\n",
+				problem.count,
+				problem.raw.trim()
+			));
 		}
 
 		fs::write(dir.join("sync-problems.md"), text).ok();
@@ -491,7 +502,13 @@ impl Journal {
 	fn history_dir(&self, key: &str) -> PathBuf {
 		let safe: String = key
 			.chars()
-			.map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+			.map(|c| {
+				if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+					c
+				} else {
+					'_'
+				}
+			})
 			.collect();
 
 		self.root.join(safe)
@@ -553,7 +570,12 @@ impl Journal {
 
 		self.history_mut(key, |history, place| {
 			// The same content is already kept for this file
-			if history.iter().rev().find(|e| e.path == rel).is_some_and(|e| e.hash == hash) {
+			if history
+				.iter()
+				.rev()
+				.find(|e| e.path == rel)
+				.is_some_and(|e| e.hash == hash)
+			{
 				return;
 			}
 
@@ -582,7 +604,11 @@ impl Journal {
 				hash,
 			};
 
-			if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(dir.join("index.jsonl")) {
+			if let Ok(mut file) = OpenOptions::new()
+				.create(true)
+				.append(true)
+				.open(dir.join("index.jsonl"))
+			{
 				if let Ok(line) = serde_json::to_string(&entry) {
 					writeln!(file, "{line}").ok();
 				}
@@ -725,7 +751,11 @@ fn write_output_log(workspace: &Path, lines: &[OutputLine]) {
 			_ => "",
 		};
 
-		let mut row = format!("{time} [{}] {kind}{}", line.context.to_lowercase(), line.text.trim_end());
+		let mut row = format!(
+			"{time} [{}] {kind}{}",
+			line.context.to_lowercase(),
+			line.text.trim_end()
+		);
 
 		if let Some(link) = line.links.first() {
 			row.push_str(&format!("  -> {}:{}", link.file, link.line));
@@ -745,11 +775,15 @@ fn classify(level: Level, message: &str, workspace: &Path) -> Option<Problem> {
 	static EXISTS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"Instance with path: (.+?) already exists").unwrap());
 	static MISSING_PATH: LazyLock<Regex> =
 		LazyLock::new(|| Regex::new(r"Path specified in the project does not exist: (.+?)\. Please").unwrap());
-	static LOCKED: LazyLock<Regex> =
-		LazyLock::new(|| Regex::new(r"Failed to \w+ \w+ at (.+?): .*(os error (1224|32|33|5)\b|used by another)").unwrap());
+	static LOCKED: LazyLock<Regex> = LazyLock::new(|| {
+		Regex::new(r"Failed to \w+ \w+ at (.+?): .*(os error (1224|32|33|5)\b|used by another)").unwrap()
+	});
 	static PARTIAL: LazyLock<Regex> =
 		LazyLock::new(|| Regex::new(r"(\d+) of (\d+) changes from Studio could not be written").unwrap());
 	static REFS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"Ref\(Some\(\d+\)\)|\d{6,}").unwrap());
+	static UNREADABLE: LazyLock<Regex> = LazyLock::new(|| {
+		Regex::new(r"Failed to process changes: (?:.*? at )?(.+?\.\w+): (.+?)(?:, source: .*)?$").unwrap()
+	});
 
 	let file_of = |path: &str| relative(workspace, Path::new(path.trim()));
 	let raw = message.to_owned();
@@ -857,7 +891,9 @@ fn classify(level: Level, message: &str, workspace: &Path) -> Option<Problem> {
 				format!("missing:{file}"),
 				"warn",
 				"A folder from the project file is missing",
-				format!("The project file maps {file}, but it doesn't exist. Create it or remove it from the project file."),
+				format!(
+					"The project file maps {file}, but it doesn't exist. Create it or remove it from the project file."
+				),
 				Some(file),
 				vec![Fix {
 					action: "openFolder",
@@ -894,8 +930,30 @@ fn classify(level: Level, message: &str, workspace: &Path) -> Option<Problem> {
 		));
 	}
 
+	if let Some(captures) = UNREADABLE.captures(message) {
+		let file = file_of(&captures[1]);
+		let error = captures[2].trim();
+
+		return Some(problem(
+			format!("read:{file}"),
+			"error",
+			"A file has an error and can't sync",
+			format!("{file}: {error}. Fix it and save; it syncs to Studio as soon as it's valid."),
+			Some(file.clone()),
+			vec![Fix {
+				action: "openFile",
+				label: "Open the file",
+				arg: Some(file),
+			}],
+		));
+	}
+
 	if message.contains("Failed to process changes") {
-		let detail = message.split("Failed to process changes:").nth(1).unwrap_or(message).trim();
+		let detail = message
+			.split("Failed to process changes:")
+			.nth(1)
+			.unwrap_or(message)
+			.trim();
 
 		return Some(problem(
 			format!("read:{}", REFS.replace_all(detail, "#")),
@@ -959,5 +1017,95 @@ impl VfsJournal for CoreJournal {
 
 		self.journal
 			.record_activity(&self.key, "toStudio", kind, relative(&self.workspace, path));
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	const WS: &str = r"C:\D\scripts\roblox projects\White Noise Games\Arm Wrestle Animals";
+
+	fn classify_line(level: Level, line: &str) -> Option<Problem> {
+		classify(level, line, Path::new(WS))
+	}
+
+	#[test]
+	fn duplicate_instances() {
+		let problem = classify_line(
+			Level::Error,
+			r"Instance with path: C:\D\scripts\roblox projects\White Noise Games\Arm Wrestle Animals\src\ReplicatedStorage\Data already exists! Skipping..",
+		)
+		.unwrap();
+
+		assert_eq!(problem.id, "duplicate:src/ReplicatedStorage/Data");
+		assert_eq!(problem.file.as_deref(), Some("src/ReplicatedStorage/Data"));
+		assert_eq!(problem.fixes[0].action, "selectInStudio");
+	}
+
+	#[test]
+	fn drift() {
+		let problem = classify_line(
+			Level::Warn,
+			"Attempted to update instance that doesn't exist: Ref(Some(264099171931332843642885858605984537436))",
+		)
+		.unwrap();
+
+		assert_eq!(problem.id, "drift");
+		assert_eq!(problem.fixes[0].action, "reconnect");
+	}
+
+	#[test]
+	fn locked_file() {
+		let problem = classify_line(
+			Level::Error,
+			r"Failed to update Ref(Some(110549936291442514350529102061852130749)): Failed to write ModuleScript at C:\D\scripts\roblox projects\White Noise Games\Arm Wrestle Animals\src\ReplicatedStorage\Modules\CageReveal.luau: The requested operation cannot be performed on a file with a user-mapped section open. (os error 1224)",
+		)
+		.unwrap();
+
+		assert_eq!(
+			problem.file.as_deref(),
+			Some("src/ReplicatedStorage/Modules/CageReveal.luau")
+		);
+		assert_eq!(problem.severity, "error");
+	}
+
+	#[test]
+	fn missing_packages() {
+		let problem = classify_line(
+			Level::Warn,
+			r"Path specified in the project does not exist: C:\D\scripts\roblox projects\White Noise Games\Arm Wrestle Animals\Packages. Please create this path and restart Aragon to watch for file changes in this path or remove it from the project to suppress this warning",
+		)
+		.unwrap();
+
+		assert_eq!(problem.fixes[0].action, "wally");
+		assert_eq!(problem.file.as_deref(), Some("Packages"));
+	}
+
+	#[test]
+	fn unreadable_file() {
+		let problem = classify_line(
+			Level::Error,
+			r#"Failed to process changes: Failed to read JsonModel at C:\D\scripts\roblox projects\White Noise Games\Arm Wrestle Animals\src\Bad.model.json: key must be a string at line 1 column 26, source: Project("ReplicatedStorage", "x")"#,
+		)
+		.unwrap();
+
+		assert_eq!(problem.file.as_deref(), Some("src/Bad.model.json"));
+		assert!(problem
+			.detail
+			.starts_with("src/Bad.model.json: key must be a string at line 1 column 26."));
+	}
+
+	#[test]
+	fn noise_is_ignored() {
+		assert!(classify_line(Level::Warn, "Failed to unwatch some path").is_none());
+	}
+
+	#[test]
+	fn unknown_errors_dedupe_across_refs() {
+		let a = classify_line(Level::Error, "Failed to remove Ref(Some(1234567890123)): boom").unwrap();
+		let b = classify_line(Level::Error, "Failed to remove Ref(Some(9876543210987)): boom").unwrap();
+
+		assert_eq!(a.id, b.id);
 	}
 }

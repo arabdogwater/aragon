@@ -8,7 +8,7 @@ import { burst } from "../motion.js";
 
 function inline(text) {
 	const out = [];
-	const pattern = /\*\*(.+?)\*\*|`([^`]+)`|\[([^\]]+)\]\((https?:[^)]+)\)/g;
+	const pattern = /\*\*(.+?)\*\*|`([^`]+)`|\[([^\]]+)\]\((https?:[^)]+)\)|\*([^*\s][^*]*?)\*/g;
 	let last = 0;
 	let match;
 
@@ -17,6 +17,7 @@ function inline(text) {
 
 		if (match[1]) out.push(html`<b>${match[1]}</b>`);
 		else if (match[2]) out.push(html`<code>${match[2]}</code>`);
+		else if (match[5]) out.push(html`<i>${match[5]}</i>`);
 		else out.push(html`<a href=${match[4]} target="_blank" rel="noreferrer">${match[3]}</a>`);
 
 		last = pattern.lastIndex;

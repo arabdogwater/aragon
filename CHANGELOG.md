@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-07
+
+### Added
+
+- **One-click updates.** A new release shows up in a corner card with its headlines. *Update now* downloads it with a
+  live progress bar, checks it against the release's SHA-256 checksums, swaps the exe and restarts Aragon by itself.
+  Studio reconnects on its own and the new Studio plugin is installed with it. Settings → Updates checks on demand
+- **Safety net.** Every file Studio overwrites or deletes on disk is kept for 14 days, even with nothing committed to
+  git. Place → *History* groups them by when it happened ("Studio deleted 29 files"), compares any copy with the file
+  as it is now, and puts back one file or a whole batch, which syncs straight into Studio
+- **Studio's Output in the dashboard, and for your AI.** Prints, warnings and errors from Studio (edit mode and
+  playtests, server and client) show up in Place → *Output*. Script references like `ServerScriptService.Shop:42`
+  are links that open the file at that line. Everything is also written to `.aragon/studio-output.log` in the project,
+  each error tagged with its file, so an AI agent can read runtime errors itself. *Copy for AI* copies the latest
+  errors with their files, ready to paste
+- **Sync problems in plain words.** Warnings that used to hide in a log file now show up as cards on the place, with a
+  one-click fix: two Studio instances sharing one file (*Select them in Studio*), a file locked by another program,
+  Wally packages not installed (*Run wally install*), Studio and the files out of step (*Reconnect*). Your AI can read
+  the same list in `.aragon/sync-problems.md`
+- **Live sync activity.** Place → *Activity* lists every file synced and in which direction, so "did that edit reach
+  Studio?" takes a glance. The home page shows the last synced file under every place open in Studio
+- **Command palette.** `Ctrl K` (or `Ctrl P`) anywhere: jump to a place, a page, any file in any project, or run an
+  action (open in Studio, reconnect, build, output, history, check for updates)
+- **Your editor, at the right line.** Aragon finds VS Code, Cursor, Windsurf, Zed and Sublime Text. Pick one in
+  Settings → Code editor and Studio's *Open In Editor*, output links and the palette open files there, at the line,
+  inside the project's window. The place page and the built-in editor get an *Open in …* button
+- *Run code* shows the output of what you ran right under it
+
+### Fixed
+
+- After an update the new Studio plugin could wait up to an hour to be installed (the local plugin check was throttled
+  together with the online update check)
+- Studio's *Open In Editor* ignored the line it was asked to open
+
 ## [1.0.6] - 2026-11-07
 
 ### Fixed

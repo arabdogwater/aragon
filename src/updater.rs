@@ -192,7 +192,11 @@ pub fn check_for_updates(plugin: bool, templates: bool, prompt: bool, cli: bool)
 	}
 
 	if cli {
-		if status.last_checked.elapsed().map_or(true, |elapsed| elapsed.as_secs() >= 3600) {
+		if status
+			.last_checked
+			.elapsed()
+			.map_or(true, |elapsed| elapsed.as_secs() >= 3600)
+		{
 			update_cli(prompt, false)?;
 			status.last_checked = SystemTime::now();
 		} else {

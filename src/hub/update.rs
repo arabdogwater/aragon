@@ -252,7 +252,10 @@ impl Hub {
 
 			if matches!(
 				state.status,
-				UpdateStatus::Downloading | UpdateStatus::Verifying | UpdateStatus::Installing | UpdateStatus::Restarting
+				UpdateStatus::Downloading
+					| UpdateStatus::Verifying
+					| UpdateStatus::Installing
+					| UpdateStatus::Restarting
 			) {
 				return Ok(());
 			}
@@ -395,7 +398,10 @@ fn cleanup_old_exe() {
 /// Starts the new exe (it waits for this one to free the hub port) and exits
 fn restart(exe: &PathBuf) -> Result<()> {
 	// Same command as now, minus `--background`: the dashboard was open when the update was started
-	let args: Vec<String> = env::args().skip(1).filter(|arg| arg != "--background" && arg != "-b").collect();
+	let args: Vec<String> = env::args()
+		.skip(1)
+		.filter(|arg| arg != "--background" && arg != "-b")
+		.collect();
 
 	let mut command = Command::new(exe);
 	command
@@ -412,4 +418,26 @@ fn restart(exe: &PathBuf) -> Result<()> {
 
 	command.spawn().context("Couldn't start the new version")?;
 	std::process::exit(0);
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn versions() {
+		assert!(is_newer("1.1.0", "1.0.6"));
+		assert!(is_newer("v1.0.10", "1.0.9"));
+		assert!(!is_newer("1.1.0", "1.1.0"));
+		assert!(!is_newer("1.0.9", "1.1.0"));
+		assert!(!is_newer("1.1.0-beta", "1.1.0"));
+	}
+
+	#[test]
+	fn changelog_has_this_version() {
+		let notes =
+			changelog_section(env!("CARGO_PKG_VERSION")).expect("CHANGELOG.md needs a section for this version");
+		assert!(!notes.contains("## ["));
+		assert!(notes.len() > 20);
+	}
 }

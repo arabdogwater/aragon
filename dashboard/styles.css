@@ -2652,7 +2652,15 @@ dialog.onboard[open] {
 
 .rail-search span {
 	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 	text-align: left;
+}
+
+.rail-search kbd {
+	flex: none;
 }
 
 kbd {
@@ -3226,17 +3234,17 @@ dialog.whats-new {
 	background: var(--paper-2);
 }
 
-.out-line.warn {
+.out-line.k-warn {
 	background: #fff6dc;
 	color: #8a5200;
 }
 
-.out-line.error {
+.out-line.k-error {
 	background: #fdecea;
 	color: #b02a20;
 }
 
-.out-line.info {
+.out-line.k-info {
 	color: var(--info);
 }
 
@@ -3467,4 +3475,18 @@ dialog.diff-dialog[open] {
 	font: 12px/1.5 var(--mono);
 	white-space: pre-wrap;
 	border-right: 2px solid var(--line-soft);
+}
+
+.tabs button {
+	white-space: nowrap;
+}
+
+.sticker {
+	padding: 4px 12px;
+	background: var(--paper);
+	border: 2px solid var(--ink);
+	border-radius: 99px;
+	box-shadow: var(--pop-sm);
+	font-weight: 800;
+	font-size: 13px;
 }

@@ -1751,7 +1751,9 @@ impl Hub {
 
 	/// Luau that selects, in Studio, every instance that maps to `relative` (duplicates included)
 	pub fn select_in_studio_code(&self, key: &str, relative: &str) -> Result<String> {
-		let core = self.core_for(key).context("No Studio is syncing this place right now")?;
+		let core = self
+			.core_for(key)
+			.context("No Studio is syncing this place right now")?;
 		let workspace = self.workspace_of(key).context("Place is not mapped")?;
 		let path = path_clean::clean(workspace.join(relative));
 

@@ -233,9 +233,9 @@ export function Place({ state, params }) {
 					["output", "Output", place.outputErrors ? html`<span class="tab-count err">${place.outputErrors}</span>` : null],
 					["problems", "Problems", problems ? html`<span class="tab-count warn">${problems}</span>` : null],
 					["history", "History"],
-					["run", "Run code"],
+					["run", "Run"],
 					["sync", "Sync"],
-					["studio", "Studio settings"],
+					["studio", "Plugin"],
 				].map(
 					([id, label, extra]) =>
 						html`<button type="button" role="tab" aria-selected=${tab === id ? "true" : "false"} onClick=${() => setTab(id)}>${label}${extra || null}</button>`,

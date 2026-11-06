@@ -178,7 +178,7 @@ export function OutputLines({ place, state, lines, filter = "all", context = "al
 	return html`<div class=${`output ${compact ? "compact" : ""}`} ref=${box} onScroll=${onScroll}>
 		${shown.length
 			? shown.map(
-					(line) => html`<div class=${`out-line ${line.kind}`} key=${line.id}>
+					(line) => html`<div class=${`out-line k-${line.kind}`} key=${line.id}>
 						<span class="out-time">${clock(line.t)}</span>
 						<span class=${`out-ctx ${line.context.toLowerCase()}`}>${line.context}</span>
 						<span class="out-text"><${OutputText} line=${line} onLink=${(link) => openFile(state, place.key, link.file, link.line)} /></span>
@@ -290,8 +290,8 @@ export function ProblemsPanel({ place, state }) {
 
 	return html`<div style="display:grid;gap:12px">
 		<div class="toolbar" style="justify-content:space-between">
-			<span class="faint" style="font-weight:800">${problems.length} problem${problems.length === 1 ? "" : "s"} · also in <span class="mono">.aragon/sync-problems.md</span> for your AI</span>
-			<${Button} className="ghost sm" icon="check" onClick=${() => dismiss(null)}>Dismiss all<//>
+			<span class="sticker">${problems.length} problem${problems.length === 1 ? "" : "s"} · also in <span class="mono">.aragon/sync-problems.md</span> for your AI</span>
+			<${Button} className="sm" icon="check" onClick=${() => dismiss(null)}>Dismiss all<//>
 		</div>
 		${problems.map(
 			(problem) => html`<article class=${`problem ${problem.severity}`} key=${problem.id}>

@@ -131,7 +131,14 @@ impl Vfs {
 		}
 
 		lock!(self.inner).write(path, contents)?;
-		journal.written(path, if existed { JournalKind::Updated } else { JournalKind::Created });
+		journal.written(
+			path,
+			if existed {
+				JournalKind::Updated
+			} else {
+				JournalKind::Created
+			},
+		);
 
 		Ok(())
 	}

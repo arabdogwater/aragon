@@ -113,7 +113,14 @@ async fn studio_output(request: MsgPack<OutputRequest>, hub: HubData) -> impl Re
 	let hub = hub.get_ref().clone();
 	let request = request.0;
 
-	let record = move || hub.record_output(request.place_id, &request.place_name, &request.context, request.messages);
+	let record = move || {
+		hub.record_output(
+			request.place_id,
+			&request.place_name,
+			&request.context,
+			request.messages,
+		)
+	};
 
 	match blocking(record).await {
 		Ok(()) => HttpResponse::Ok().body("Recorded"),
@@ -509,7 +516,9 @@ async fn fix_problem(key: UrlPath<String>, request: Json<FixRequest>, hub: HubDa
 				hub.reconnect(&key, "Reconnecting to fix sync problems");
 			}
 			"wally" => {
-				let workspace = hub.workspace_of(&key).ok_or_else(|| anyhow::anyhow!("Place is not mapped"))?;
+				let workspace = hub
+					.workspace_of(&key)
+					.ok_or_else(|| anyhow::anyhow!("Place is not mapped"))?;
 
 				Program::new(ProgramName::Wally)
 					.message("Failed to run Wally")
@@ -524,7 +533,10 @@ async fn fix_problem(key: UrlPath<String>, request: Json<FixRequest>, hub: HubDa
 				hub.open_file(&key, &file, 1);
 			}
 			"openFolder" => {
-				open::that(hub.workspace_of(&key).ok_or_else(|| anyhow::anyhow!("Place is not mapped"))?)?;
+				open::that(
+					hub.workspace_of(&key)
+						.ok_or_else(|| anyhow::anyhow!("Place is not mapped"))?,
+				)?;
 			}
 			"selectInStudio" => {
 				let code = hub.select_in_studio_code(&key, &request.arg.unwrap_or_default())?;
@@ -608,7 +620,9 @@ async fn restore_history(key: UrlPath<String>, request: Json<RestoreRequest>, hu
 	let ids = request.into_inner().ids;
 
 	let result = blocking(move || -> Result<usize> {
-		let workspace = hub.workspace_of(&key).ok_or_else(|| anyhow::anyhow!("Place is not mapped"))?;
+		let workspace = hub
+			.workspace_of(&key)
+			.ok_or_else(|| anyhow::anyhow!("Place is not mapped"))?;
 		let mut restored = 0;
 
 		for id in ids {
@@ -713,7 +727,9 @@ async fn open_in_editor(key: UrlPath<String>, request: Json<OpenInRequest>, hub:
 	let request = request.into_inner();
 
 	let result = blocking(move || -> Result<()> {
-		let workspace = hub.workspace_of(&key).ok_or_else(|| anyhow::anyhow!("Place is not mapped"))?;
+		let workspace = hub
+			.workspace_of(&key)
+			.ok_or_else(|| anyhow::anyhow!("Place is not mapped"))?;
 
 		match (request.editor, request.path) {
 			(Some(editor), path) => {
@@ -781,18 +797,25 @@ fn collect_files(root: &Path, dir: &Path, out: &mut Vec<String>) {
 	}
 }
 
-/// Fuzzy subsequence score, higher is better; file-name hits beat folder hits
+/// Fuzzy subsequence score, higher is better; file-name hits beat folder hits, code beats art
 fn fuzzy_score(query: &str, path: &str) -> Option<i64> {
 	let lower = path.to_lowercase();
 	let name_start = lower.rfind('/').map_or(0, |i| i + 1);
 	let name = &lower[name_start..];
 
+	let code = [
+		".luau", ".lua", ".ts", ".tsx", ".json", ".toml", ".md", ".yaml", ".yml", ".txt", ".csv",
+	]
+	.iter()
+	.any(|ext| name.ends_with(ext));
+	let kind = if code { 300 } else { 0 };
+
 	if name.contains(query) {
-		return Some(1000 - path.len() as i64 + if name.starts_with(query) { 500 } else { 0 });
+		return Some(1000 + kind - path.len() as i64 + if name.starts_with(query) { 500 } else { 0 });
 	}
 
 	if lower.contains(query) {
-		return Some(500 - path.len() as i64);
+		return Some(500 + kind - path.len() as i64);
 	}
 
 	let mut score = 0;
@@ -836,7 +859,7 @@ async fn search_files(query: Query<FilesQuery>, hub: HubData) -> impl Responder 
 			}
 		}
 
-		hits.sort_by(|a, b| b.0.cmp(&a.0));
+		hits.sort_by_key(|hit| std::cmp::Reverse(hit.0));
 		hits.into_iter().take(40).map(|(_, hit)| hit).collect::<Vec<_>>()
 	};
 
