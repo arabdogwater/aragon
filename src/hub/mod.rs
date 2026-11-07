@@ -1070,8 +1070,15 @@ impl Hub {
 					.store()
 					.places
 					.get(previous)
-					.map(|p| p.name.clone())
-					.unwrap_or_default();
+					.map(|p| {
+						if p.name.is_empty() {
+							format!("place {}", p.place_id)
+						} else {
+							p.name.clone()
+						}
+					})
+					.unwrap_or_else(|| String::from("another place"));
+
 				bail!("This folder belongs to {name}. Carry it over to move it to this place");
 			}
 		}

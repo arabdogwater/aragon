@@ -395,10 +395,15 @@ mod tests {
 	#[test]
 	fn one_folder_per_place() {
 		let mut store = HubStore::default();
-		store.places.insert("1".into(), place("1", Some(r"C:\Games\Old\default.project.json")));
+		store
+			.places
+			.insert("1".into(), place("1", Some(r"C:\Games\Old\default.project.json")));
 		store.places.insert("2".into(), place("2", None));
 
-		assert_eq!(store.folder_owner(Path::new(r"C:\games\old"), "2").as_deref(), Some("1"));
+		assert_eq!(
+			store.folder_owner(Path::new(r"C:\games\old"), "2").as_deref(),
+			Some("1")
+		);
 		assert_eq!(store.folder_owner(Path::new(r"C:\Games\Old"), "1"), None);
 		assert_eq!(store.folder_owner(Path::new(r"C:\Games\Other"), "2"), None);
 	}

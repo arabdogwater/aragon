@@ -3735,3 +3735,13 @@ dialog.diff-dialog[open] {
 	font-weight: 600;
 	color: var(--ink-2);
 }
+
+/* Long paths (plugin location, project folders) wrap instead of widening the page */
+.setting > div:first-child {
+	min-width: 0;
+}
+
+.setting .mono,
+.setting p {
+	overflow-wrap: anywhere;
+}

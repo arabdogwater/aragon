@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-07
+
+### Fixed
+
+- **Removed places came back.** Removing a place only deleted it until something re-created it: Studio opening it,
+  the Roblox account refresh or the project scan. A removed place now stays removed. If Studio opens it, the plugin
+  says it was removed instead of syncing. Settings → *Removed places* adds it back (it gets a new setup) or forgets it
+  for good. Adding it by place ID brings it back too. Places removed with an older version need removing once more
+- **Two places could share one folder.** Auto-mapping and the project scan could hand a folder that already belongs to
+  a place to a second one. A folder now belongs to exactly one place, and setup refuses a folder another place owns
+  unless you carry it over
+
+### Added
+
+- **Carry a folder over to a remade place.** Setup suggests the folders of your other places (same name first) under
+  *Remade this game? Carry over a folder*. Picking one, or browsing to a folder another place owns, switches to *Files
+  win* so the code is kept. Carrying over unlinks the old place (it needs a new setup) and removes it from the
+  dashboard unless you untick that. `placeIds` / `gameId` pinned in the project file are pointed at the new place
+- **Right-click menus** on places (Places page, top tiles, the live strip, the place page and its new … button): open
+  in Studio, folder, editor or code, move to a group, copy IDs or the folder path, pause sync, change or unmap the
+  folder, remove from the dashboard
+- **Organize the Places page your way.** Drag places between groups and into any order, drag whole groups up and down,
+  and make your own groups (*New group*, or right-click → Move to group → New group). Right-click a group to rename or
+  delete it. The place page still shows the real owner, plus your group as a badge
+
+### Changed
+
+- Long paths in Settings wrap instead of widening the page
+
 ## [1.1.0] - 2026-11-07
 
 ### Added

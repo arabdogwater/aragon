@@ -84,6 +84,7 @@ export function Onboarding({ state, placeKey, onMapping, onClose }) {
 	// Carrying a folder over from another place (a remade game): the folder keeps its files, that place lets go
 	const candidates = carryCandidates(state, place);
 	const owner = path.trim() ? state.places.find((p) => p.project && p.key !== place.key && folderKey(p.workspace) === folderKey(path)) : null;
+	const ownerName = owner ? owner.name || (owner.placeId ? `place ${owner.placeId}` : "another place") : null;
 
 	const carryOver = (from) => {
 		setTouched(true);
@@ -130,7 +131,7 @@ export function Onboarding({ state, placeKey, onMapping, onClose }) {
 		}
 
 		setMapping(false);
-		setDone({ path, live, from: owner ? owner.name : null });
+		setDone({ path, live, from: ownerName });
 
 		const rect = submitter ? submitter.getBoundingClientRect() : null;
 		burst(rect ? rect.left + rect.width / 2 : innerWidth / 2, rect ? rect.top : innerHeight / 2);
@@ -215,14 +216,14 @@ export function Onboarding({ state, placeKey, onMapping, onClose }) {
 					? html`<div class="carry-warning">
 							<${Thumb} src=${owner.iconUrl} />
 							<div>
-								<b>This folder belongs to ${owner.name}</b>
+								<b>This folder belongs to ${ownerName}</b>
 								<p>
-									Carrying it over moves the folder and its code to ${place.name || "this place"}. ${owner.name} stops syncing and needs a new
+									Carrying it over moves the folder and its code to ${place.name || "this place"}. ${ownerName} stops syncing and needs a new
 									setup. Two places never share a folder.
 								</p>
 								<label class="toggle">
 									<${Switch} label="Also remove it from the dashboard" checked=${removePrevious} onChange=${setRemovePrevious} />
-									Also remove ${owner.name} from the dashboard
+									Also remove ${ownerName} from the dashboard
 								</label>
 							</div>
 						</div>`

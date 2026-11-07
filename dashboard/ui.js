@@ -307,20 +307,23 @@ export function ContextMenu() {
 	useEffect(() => {
 		if (!menu) return;
 
+		const opened = performance.now();
 		const close = () => setMenu(null);
 		const onDown = (e) => box.current && !box.current.contains(e.target) && close();
 		const onKey = (e) => e.key === "Escape" && close();
+		// The window can lose focus during the right-click itself (focus moving into the WebView): not a reason to close
+		const onBlur = () => performance.now() - opened > 300 && close();
 
 		addEventListener("mousedown", onDown, true);
 		addEventListener("keydown", onKey);
-		addEventListener("blur", close);
+		addEventListener("blur", onBlur);
 		addEventListener("resize", close);
 		addEventListener("wheel", close, { passive: true });
 
 		return () => {
 			removeEventListener("mousedown", onDown, true);
 			removeEventListener("keydown", onKey);
-			removeEventListener("blur", close);
+			removeEventListener("blur", onBlur);
 			removeEventListener("resize", close);
 			removeEventListener("wheel", close);
 		};

@@ -364,14 +364,16 @@ async fn move_place(key: UrlPath<String>, request: Json<MoveRequest>, hub: HubDa
 	{
 		let mut store = hub.store();
 
-		let last = request.group.as_ref().map(|group| {
+		// After the places the user already ordered there; with none ordered it simply joins the group (places
+		// without a position follow the ordered ones)
+		let last = request.group.as_ref().and_then(|group| {
 			store
 				.places
 				.values()
 				.filter(|place| place.group.as_ref() == Some(group))
 				.filter_map(|place| place.order)
 				.max()
-				.map_or(0, |max| max + 1)
+				.map(|max| max + 1)
 		});
 
 		let Some(place) = store.places.get_mut(key.as_str()) else {
