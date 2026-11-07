@@ -1,7 +1,8 @@
 import { html, useState } from "../vendor/preact-htm.js";
 import { go, post, api, fmt, fmtFull, fmtMinutes, ago, series, sum, placeStatus, useAction, toast, editorName } from "../lib.js";
 import { ActivityPanel, OutputPanel, ProblemsPanel, HistoryPanel, OutputLines, useOutput } from "./insights.js";
-import { Icon, Thumb, Copyable, Button, BarChart, Languages, Switch, Seg } from "../ui.js";
+import { Icon, Thumb, Copyable, Button, BarChart, Languages, Switch, Seg, openMenu } from "../ui.js";
+import { placeMenu, removePlace } from "./placemenu.js";
 import { CountUp } from "../motion.js";
 import { SettingControl } from "./settings.js";
 
@@ -184,7 +185,7 @@ export function Place({ state, params }) {
 	return html`<div class="page">
 		<a href="#/" class="faint" style="display:inline-flex;align-items:center;gap:4px"><${Icon} name="back" />Places</a>
 
-		<section class="hero">
+		<section class="hero" onContextMenu=${(e) => openMenu(e, placeMenu(state, place))}>
 			<div class="art" style=${place.thumbnailUrl ? `background-image:url("${place.thumbnailUrl}")` : ""}></div>
 			<div class="hero-body">
 				<${Thumb} src=${place.iconUrl} />
@@ -196,7 +197,11 @@ export function Place({ state, params }) {
 					</div>
 					<div class="facts">
 						${!place.isRoot && place.gameName ? html`<span>in ${place.gameName}</span>` : null}
-						<span>${place.ownerName || "Owner unknown"}</span>
+						<span>${place.ownerName || "Owner unknown"}${place.ownerType ? html` <span class="faint">(${place.ownerType})</span>` : null}</span>
+						${(() => {
+							const group = place.group && state.groups.find((g) => g.id === place.group);
+							return group ? html`<span class="badge" title="Your group on the Places page">📁 ${group.name}</span>` : null;
+						})()}
 						${place.placeId ? html`<${Copyable} value=${place.placeId}>place ${place.placeId}<//>` : null}
 						${place.universeId ? html`<${Copyable} value=${place.universeId}>universe ${place.universeId}<//>` : null}
 					</div>
@@ -221,6 +226,15 @@ export function Place({ state, params }) {
 					${place.placeId
 						? html`<${Button} className=${place.project ? "primary" : ""} icon="studio" onClick=${() => action("openStudio", "Opening Roblox Studio…")}>Open in Studio<//>`
 						: null}
+					<button
+						type="button"
+						class="btn icon more-btn"
+						aria-label="More actions"
+						title="More actions (or right-click anywhere on the place)"
+						onClick=${(e) => openMenu(e, placeMenu(state, place))}
+					>
+						⋯
+					</button>
 				</div>
 			</div>
 		</section>
@@ -338,19 +352,9 @@ export function Place({ state, params }) {
 					<div class="setting">
 						<div>
 							<b>Remove from dashboard</b>
-							<p>Forgets this place and its analytics. Files on disk are not touched.</p>
+							<p>Stops syncing it and keeps it gone: Studio opening it or a Roblox refresh won't bring it back. Files on disk are not touched. Add it back from Settings → Removed places.</p>
 						</div>
-						<${Button}
-							className="danger"
-							icon="trash"
-							onClick=${async () => {
-								if (!confirm(`Remove ${place.name} from Aragon?`)) return;
-								await run("remove", () => api(`/api/places/${place.key}`, { method: "DELETE" }), "Removed");
-								go("#/");
-							}}
-						>
-							Remove
-						<//>
+						<${Button} className="danger" icon="trash" onClick=${() => removePlace(place, () => go("#/"))}>Remove<//>
 					</div>
 				</section>`
 			: null}

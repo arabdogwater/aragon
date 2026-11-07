@@ -16,17 +16,19 @@ local Children = Fusion.Children
 
 type Props = {
 	App: { [string]: any },
+	-- Why, when the hub says (a place removed from the dashboard)
+	Message: string?,
 }
 
--- Sync for this place was turned off in the dashboard
+-- Sync for this place was turned off in the dashboard, or the place was removed from it
 return function(props: Props): { Instance }
 	return {
 		List {},
 		StatusCard {
-			Title = "Sync paused",
+			Title = if props.Message then "Not synced" else "Sync paused",
 			Status = "Paused",
 			Mascot = Assets.Mascots.Sleepy,
-			Body = "Sync for this place is turned off in the Aragon dashboard.",
+			Body = props.Message or "Sync for this place is turned off in the Aragon dashboard.",
 			Color = Theme.Colors.TextDimmed,
 		},
 		Container {

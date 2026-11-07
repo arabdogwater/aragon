@@ -1,6 +1,7 @@
 import { html, useState, useMemo, useEffect, useRef } from "../vendor/preact-htm.js";
-import { go, post, fmt, fmtMinutes, ago, agoMs, series, sum, placeStatus, useAction, toast, dayKey } from "../lib.js";
-import { Icon, Thumb, Seg, Copyable, Sparkline, Button } from "../ui.js";
+import { go, post, api, fmt, fmtMinutes, ago, agoMs, series, sum, placeStatus, useAction, toast, dayKey } from "../lib.js";
+import { Icon, Thumb, Seg, Copyable, Sparkline, Button, openMenu } from "../ui.js";
+import { placeMenu, groupOf, newGroup } from "./placemenu.js";
 import { CountUp, useTilt } from "../motion.js";
 
 function loadCollapsed() {
@@ -17,40 +18,51 @@ function saveCollapsed(value) {
 	} catch {}
 }
 
-/// Group places by owner: you, your groups, then everyone else
-function groupPlaces(places, owners) {
+/// Groups on the Places page: the user's own groups, then by owner (you, your groups, everyone else), in the
+/// order the user dragged them. Places the user moved sit in the group they were dropped in, in that order
+function groupPlaces(state, places, withEmpty) {
+	const custom = new Map(state.groups.map((group) => [group.id, group]));
 	const groups = new Map();
 
 	for (const place of places) {
-		const key = place.ownerKey || (place.placeId === 0 ? "local" : "unsorted");
+		const key = groupOf(state, place);
 		if (!groups.has(key)) groups.set(key, []);
 		groups.get(key).push(place);
 	}
 
+	// Empty groups the user made stay visible: they're drop targets
+	if (withEmpty) for (const group of state.groups) if (!groups.has(group.id)) groups.set(group.id, []);
+
 	const ranked = [...groups.entries()].map(([key, list]) => {
-		const owner = owners[key];
-		const rank = !owner
-			? key === "unsorted"
-				? 4
-				: 5
-			: owner.mine
-				? owner.kind === "User"
-					? 0
-					: 1
-				: 3;
+		const owner = state.owners[key];
+		const group = custom.get(key);
+		const rank = group ? -1 : !owner ? (key === "unsorted" ? 4 : 5) : owner.mine ? (owner.kind === "User" ? 0 : 1) : 3;
 
 		list.sort(
 			(a, b) =>
+				(a.order ?? 1e9) - (b.order ?? 1e9) ||
 				b.score - a.score ||
 				(b.project ? 1 : 0) - (a.project ? 1 : 0) ||
 				(b.isRoot ? 1 : 0) - (a.isRoot ? 1 : 0) ||
 				a.name.localeCompare(b.name),
 		);
 
-		return { key, owner, list, rank, name: owner ? owner.name : key === "local" ? "Local files" : "Resolving…" };
+		return {
+			key,
+			owner,
+			custom: group,
+			list,
+			rank,
+			name: group ? group.name : owner ? owner.name : key === "local" ? "Local files" : "Resolving…",
+		};
 	});
 
-	ranked.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name));
+	const position = (group) => {
+		const index = state.groupOrder.indexOf(group.key);
+		return index >= 0 ? index : 10000 + group.rank * 100;
+	};
+
+	ranked.sort((a, b) => position(a) - position(b) || a.name.localeCompare(b.name));
 	return ranked;
 }
 
@@ -144,6 +156,7 @@ function LiveStrip({ state }) {
 					class=${`live-item ${needs ? "needs" : ""}`}
 					key=${session.placeKey}
 					style=${`--i:${index}`}
+					onContextMenu=${(e) => place && openMenu(e, placeMenu(state, place))}
 					onClick=${() => (needs ? go(`#/setup/${session.placeKey}`) : go(`#/place/${session.placeKey}`))}
 				>
 					<${Thumb} src=${place && place.iconUrl} />
@@ -166,7 +179,7 @@ function LiveStrip({ state }) {
 	</section>`;
 }
 
-function TopPlaces({ places }) {
+function TopPlaces({ places, state }) {
 	const top = places
 		.filter((p) => p.score > 0)
 		.sort((a, b) => b.score - a.score)
@@ -181,17 +194,24 @@ function TopPlaces({ places }) {
 			<span class="line"></span>
 		</div>
 		<div class=${`top-grid stagger n${top.length}`}>
-			${top.map((place, index) => html`<${TopTile} key=${place.key} place=${place} index=${index} />`)}
+			${top.map((place, index) => html`<${TopTile} key=${place.key} place=${place} index=${index} state=${state} />`)}
 		</div>
 	</section>`;
 }
 
-function TopTile({ place, index }) {
+function TopTile({ place, index, state }) {
 	const tilt = useTilt(5);
 	const week = series(place.stats.daily, 14, "added");
 	const today = series(place.stats.daily, 1, "minutes")[0].value;
 
-	return html`<button type="button" class="top-tile tilt" style=${`--i:${index}`} ...${tilt} onClick=${() => go(`#/place/${place.key}`)}>
+	return html`<button
+		type="button"
+		class="top-tile tilt"
+		style=${`--i:${index}`}
+		...${tilt}
+		onClick=${() => go(`#/place/${place.key}`)}
+		onContextMenu=${(e) => openMenu(e, placeMenu(state, place))}
+	>
 					<div class="art" style=${place.thumbnailUrl ? `background-image:url("${place.thumbnailUrl}")` : ""}></div>
 					<span class="rank">#${index + 1}</span>
 					<div class="body">
@@ -223,17 +243,26 @@ function shortPath(workspace, root) {
 	return base && full.toLowerCase().startsWith(base.toLowerCase() + "/") ? full.slice(base.length + 1) : full;
 }
 
-function PlaceRow({ place, sessions, root, index }) {
+function PlaceRow({ place, sessions, root, index, state, drag }) {
 	const status = placeStatus(place, sessions);
 	const trend = series(place.stats.daily, 14, "added").map((p) => p.value);
+	const target = drag && drag.over && drag.over.key === place.key ? (drag.over.after ? "drop-after" : "drop-before") : "";
 
 	return html`<div
-		class="row"
+		class=${`row ${drag && drag.dragging === place.key ? "dragging" : ""} ${target}`}
 		style=${`--i:${index}`}
 		role="link"
 		tabindex="0"
+		draggable=${drag ? "true" : "false"}
+		onDragStart=${drag && ((e) => drag.start(e, place))}
+		onDragEnd=${drag && drag.end}
+		onDragOver=${drag && ((e) => drag.overRow(e, place))}
 		onClick=${() => go(`#/place/${place.key}`)}
-		onKeyDown=${(e) => e.key === "Enter" && go(`#/place/${place.key}`)}
+		onContextMenu=${(e) => openMenu(e, placeMenu(state, place))}
+		onKeyDown=${(e) => {
+			if (e.key === "Enter") go(`#/place/${place.key}`);
+			if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) openMenu(e, placeMenu(state, place));
+		}}
 	>
 		<${Thumb} src=${place.iconUrl} />
 		<div class="name">
@@ -361,7 +390,98 @@ export function Home({ state }) {
 		});
 	}, [state.places, state.sessions, query, filter]);
 
-	const groups = useMemo(() => groupPlaces(places, state.owners), [places, state.owners]);
+	const arranging = filter === "all" && !query.trim();
+	const groups = useMemo(() => groupPlaces(state, places, arranging), [places, state, arranging]);
+
+	// Drag and drop: places between groups (and inside one), whole groups up and down
+	const [dragging, setDragging] = useState(null);
+	const [over, setOver] = useState(null);
+
+	const endDrag = () => {
+		setDragging(null);
+		setOver(null);
+	};
+
+	const startDrag = (e, kind, key) => {
+		e.stopPropagation();
+		e.dataTransfer.effectAllowed = "move";
+		e.dataTransfer.setData("text/plain", key);
+		setDragging({ kind, key });
+	};
+
+	const overRow = (group, e, place) => {
+		if (!dragging || dragging.kind !== "place") return;
+
+		e.preventDefault();
+		e.stopPropagation();
+
+		const rect = e.currentTarget.getBoundingClientRect();
+		const after = e.clientY > rect.top + rect.height / 2;
+
+		if (!over || over.group !== group.key || over.key !== place.key || over.after !== after) setOver({ group: group.key, key: place.key, after });
+	};
+
+	const overGroup = (group, e) => {
+		if (!dragging) return;
+		e.preventDefault();
+
+		if (dragging.kind === "place") {
+			if (!over || over.group !== group.key || over.key) setOver({ group: group.key, key: null });
+			return;
+		}
+
+		const rect = e.currentTarget.getBoundingClientRect();
+		const after = e.clientY > rect.top + Math.min(rect.height / 2, 40);
+		if (!over || over.groupKey !== group.key || over.after !== after) setOver({ groupKey: group.key, after });
+	};
+
+	const drop = (e) => {
+		e.preventDefault();
+
+		if (dragging && over && dragging.kind === "place" && over.group) {
+			const target = groups.find((g) => g.key === over.group);
+			const keys = target ? target.list.map((p) => p.key).filter((k) => k !== dragging.key) : [];
+			let index = over.key ? keys.indexOf(over.key) + (over.after ? 1 : 0) : keys.length;
+
+			if (index < 0) index = keys.length;
+			keys.splice(index, 0, dragging.key);
+
+			post("/api/places/arrange", { group: over.group, keys }).catch((err) => toast(err.message, "err"));
+		} else if (dragging && over && dragging.kind === "group" && over.groupKey && over.groupKey !== dragging.key) {
+			const keys = groups.map((g) => g.key).filter((k) => k !== dragging.key);
+			keys.splice(keys.indexOf(over.groupKey) + (over.after ? 1 : 0), 0, dragging.key);
+
+			post("/api/groups/order", { order: keys }).catch((err) => toast(err.message, "err"));
+		}
+
+		endDrag();
+	};
+
+	const groupMenu = (group) => [
+		group.custom
+			? {
+					label: "Rename…",
+					icon: "gear",
+					run: () => {
+						const name = prompt("Rename the group", group.name);
+						if (name && name.trim()) post(`/api/groups/${encodeURIComponent(group.key)}`, { name }).catch((err) => toast(err.message, "err"));
+					},
+				}
+			: null,
+		group.custom
+			? {
+					label: "Delete group",
+					icon: "trash",
+					danger: true,
+					run: () =>
+						confirm(`Delete the group "${group.name}"? Its places go back under their owners.`) &&
+						api(`/api/groups/${encodeURIComponent(group.key)}`, { method: "DELETE" }).catch((err) => toast(err.message, "err")),
+				}
+			: null,
+		"-",
+		{ label: collapsed[group.key] ? "Expand" : "Collapse", icon: "chevron", run: () => toggle(group.key) },
+		{ label: "New group…", icon: "plus", run: () => newGroup() },
+	];
 	const mapped = state.places.filter((p) => p.project).length;
 	const known = !!(state.account || state.studioUserId);
 
@@ -378,7 +498,7 @@ export function Home({ state }) {
 			<div>
 				<h2>Places</h2>
 				<p>
-					${state.places.length} places · ${mapped} mapped to folders
+					${state.places.length} places · ${mapped} mapped to folders · drag to organize, right-click for more
 					${state.refresh.running ? html` · <span class="muted">${state.refresh.stage}…</span>` : null}
 				</p>
 			</div>
@@ -408,6 +528,7 @@ export function Home({ state }) {
 					]}
 				/>
 				<${AddPlace} />
+				<${Button} icon="folder" title="Make a group and drag places into it" onClick=${() => newGroup()}>New group<//>
 				${known
 					? html`<${Button}
 							className="icon"
@@ -436,21 +557,32 @@ export function Home({ state }) {
 			: null}
 
 		<${LiveStrip} state=${state} />
-		${filter === "all" && !query ? html`<${TopPlaces} places=${state.places} />` : null}
+		${filter === "all" && !query ? html`<${TopPlaces} places=${state.places} state=${state} />` : null}
 
 		${groups.length
 			? groups.map(
-					(group) => html`<section class="owner" key=${group.key}>
+					(group) => html`<section
+						class=${`owner ${over && over.group === group.key && !over.key ? "drop-into" : ""} ${over && over.groupKey === group.key ? (over.after ? "drop-after" : "drop-before") : ""} ${dragging && dragging.key === group.key ? "dragging" : ""}`}
+						key=${group.key}
+						onDragOver=${arranging ? (e) => overGroup(group, e) : undefined}
+						onDrop=${arranging ? drop : undefined}
+					>
 						<button
 							type="button"
-							class=${`owner-head ${group.owner && group.owner.kind === "User" ? "user" : ""}`}
+							class=${`owner-head ${group.owner && group.owner.kind === "User" ? "user" : ""} ${group.custom ? "custom" : ""}`}
 							aria-expanded=${collapsed[group.key] ? "false" : "true"}
+							draggable=${arranging ? "true" : "false"}
+							onDragStart=${arranging ? (e) => startDrag(e, "group", group.key) : undefined}
+							onDragEnd=${endDrag}
 							onClick=${() => toggle(group.key)}
+							onContextMenu=${(e) => openMenu(e, groupMenu(group))}
 						>
 							<${Icon} name="chevron" className="chev" />
-							${group.owner && group.owner.iconUrl
-								? html`<img src=${group.owner.iconUrl} alt="" />`
-								: html`<span class="avatar-fallback"></span>`}
+							${group.custom
+								? html`<span class="group-icon"><${Icon} name="folder" /></span>`
+								: group.owner && group.owner.iconUrl
+									? html`<img src=${group.owner.iconUrl} alt="" />`
+									: html`<span class="avatar-fallback"></span>`}
 							<h2>${group.name}</h2>
 							${group.owner && group.owner.role ? html`<span class="badge">${group.owner.role}</span>` : null}
 							<span class="faint">${group.list.length}</span>
@@ -458,7 +590,26 @@ export function Home({ state }) {
 						${collapsed[group.key]
 							? null
 							: html`<div class="rows stagger">
-									${group.list.map((place, index) => html`<${PlaceRow} key=${place.key} index=${index} place=${place} sessions=${state.sessions} root=${state.projectsRoot} />`)}
+									${group.list.map(
+										(place, index) => html`<${PlaceRow}
+											key=${place.key}
+											index=${index}
+											place=${place}
+											state=${state}
+											sessions=${state.sessions}
+											root=${state.projectsRoot}
+											drag=${arranging
+												? {
+														dragging: dragging && dragging.kind === "place" ? dragging.key : null,
+														over: over && over.group === group.key ? over : null,
+														start: (e, p) => startDrag(e, "place", p.key),
+														end: endDrag,
+														overRow: (e, p) => overRow(group, e, p),
+													}
+												: null}
+										/>`,
+									)}
+									${!group.list.length ? html`<div class="drop-zone">Drag places here</div>` : null}
 								</div>`}
 					</section>`,
 				)

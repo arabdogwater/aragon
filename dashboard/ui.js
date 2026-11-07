@@ -1,5 +1,5 @@
 // UI primitives: icons, thumbnails, switches, charts
-import { html, useState, useRef } from "./vendor/preact-htm.js";
+import { html, useState, useRef, useEffect, useLayoutEffect } from "./vendor/preact-htm.js";
 import { copy, fmtFull } from "./lib.js";
 
 const PATHS = {
@@ -226,5 +226,126 @@ export function Languages({ languages }) {
 				</div>`,
 			)}
 		</div>
+	</div>`;
+}
+
+// Right-click menus ---------------------------------------------------------------
+// openMenu(event, items) from any onContextMenu; <ContextMenu /> (mounted once in the app) draws it.
+// An item is { label, icon, run, danger, disabled, hint, items } (items = a submenu), or "-" for a divider
+
+const menuListeners = new Set();
+
+export function openMenu(event, items) {
+	event.preventDefault();
+	event.stopPropagation();
+
+	let x = event.clientX;
+	let y = event.clientY;
+
+	// Opened from a button (keyboard or the "..." button): below it
+	if (!x && !y && event.currentTarget && event.currentTarget.getBoundingClientRect) {
+		const rect = event.currentTarget.getBoundingClientRect();
+		x = rect.left;
+		y = rect.bottom + 4;
+	}
+
+	const clean = [];
+
+	for (const item of items) {
+		if (!item) continue;
+		if (item === "-" && (!clean.length || clean[clean.length - 1] === "-")) continue;
+		clean.push(item);
+	}
+
+	while (clean[clean.length - 1] === "-") clean.pop();
+
+	menuListeners.forEach((listener) => listener({ x, y, items: clean }));
+}
+
+function MenuItems({ items, close }) {
+	return items.map((item, index) => {
+		if (item === "-") return html`<div class="ctx-sep" key=${`sep${index}`}></div>`;
+
+		const sub = item.items && item.items.filter(Boolean);
+
+		return html`<div class=${`ctx-row ${sub ? "has-sub" : ""}`} key=${item.label}>
+			<button
+				type="button"
+				class=${`ctx-item ${item.danger ? "danger" : ""}`}
+				disabled=${item.disabled}
+				onClick=${() => {
+					if (sub) return;
+					close();
+					item.run && item.run();
+				}}
+			>
+				<span class="ctx-icon">${item.icon ? html`<${Icon} name=${item.icon} size=${15} />` : null}</span>
+				<span class="ctx-label">${item.label}</span>
+				${item.hint ? html`<span class="ctx-hint">${item.hint}</span>` : null}
+				${sub ? html`<${Icon} name="chevron" size=${14} style="transform:rotate(-90deg)" />` : null}
+			</button>
+			${sub ? html`<div class="ctx-menu ctx-sub"><${MenuItems} items=${sub} close=${close} /></div>` : null}
+		</div>`;
+	});
+}
+
+export function ContextMenu() {
+	const [menu, setMenu] = useState(null);
+	const [position, setPosition] = useState(null);
+	const box = useRef(null);
+
+	useEffect(() => {
+		const listener = (next) => {
+			setPosition(null);
+			setMenu(next);
+		};
+
+		menuListeners.add(listener);
+		return () => menuListeners.delete(listener);
+	}, []);
+
+	useEffect(() => {
+		if (!menu) return;
+
+		const close = () => setMenu(null);
+		const onDown = (e) => box.current && !box.current.contains(e.target) && close();
+		const onKey = (e) => e.key === "Escape" && close();
+
+		addEventListener("mousedown", onDown, true);
+		addEventListener("keydown", onKey);
+		addEventListener("blur", close);
+		addEventListener("resize", close);
+		addEventListener("wheel", close, { passive: true });
+
+		return () => {
+			removeEventListener("mousedown", onDown, true);
+			removeEventListener("keydown", onKey);
+			removeEventListener("blur", close);
+			removeEventListener("resize", close);
+			removeEventListener("wheel", close);
+		};
+	}, [menu]);
+
+	// Keep it on screen, open submenus to the left near the right edge
+	useLayoutEffect(() => {
+		if (!menu || !box.current) return;
+
+		const { offsetWidth: w, offsetHeight: h } = box.current;
+		const x = Math.max(8, Math.min(menu.x, innerWidth - w - 8));
+		const y = Math.max(8, Math.min(menu.y, innerHeight - h - 8));
+
+		setPosition({ x, y, flip: x + w + 220 > innerWidth });
+	}, [menu]);
+
+	if (!menu) return null;
+
+	return html`<div
+		class=${`ctx-menu ${position && position.flip ? "flip" : ""}`}
+		role="menu"
+		ref=${box}
+		style=${position ? `left:${position.x}px;top:${position.y}px` : `left:${menu.x}px;top:${menu.y}px;visibility:hidden`}
+		onContextMenu=${(e) => e.preventDefault()}
+	>
+		<${MenuItems} items=${menu.items} close=${() => setMenu(null)} />
 	</div>`;
 }

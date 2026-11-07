@@ -473,6 +473,7 @@ function App:connectorStep()
 		self:setIcon()
 		self:setStatus("Paused", Paused {
 			App = self,
+			Message = response.message,
 		})
 
 		self:sleep(RECHECK_INTERVAL * 3)

@@ -304,6 +304,176 @@ async fn remove_place(key: UrlPath<String>, hub: HubData) -> impl Responder {
 	ok()
 }
 
+#[post("/api/places/{key}/restore")]
+async fn restore_place(key: UrlPath<String>, hub: HubData) -> impl Responder {
+	hub.restore_place(&key);
+	ok()
+}
+
+#[delete("/api/removed/{key}")]
+async fn forget_removed(key: UrlPath<String>, hub: HubData) -> impl Responder {
+	hub.forget_removed(&key);
+	ok()
+}
+
+// Dashboard: grouping the Places page ///////////////////////////////////////
+
+#[derive(Deserialize)]
+struct ArrangeRequest {
+	/// Owner key or custom group id the places are now in
+	group: String,
+	/// Every place of that group, in the order the user wants
+	keys: Vec<String>,
+}
+
+/// Drag and drop on the Places page: puts places in a group, in this order
+#[post("/api/places/arrange")]
+async fn arrange_places(request: Json<ArrangeRequest>, hub: HubData) -> impl Responder {
+	{
+		let mut store = hub.store();
+
+		let known = store.groups.iter().any(|g| g.id == request.group) || store.owners.contains_key(&request.group);
+		let natural = request.group == "unsorted" || request.group == "local";
+
+		if !known && !natural {
+			return error("Unknown group");
+		}
+
+		for (index, key) in request.keys.iter().enumerate() {
+			if let Some(place) = store.places.get_mut(key) {
+				place.group = Some(request.group.clone());
+				place.order = Some(index as i64);
+			}
+		}
+	}
+
+	hub.save();
+	hub.bump();
+	ok()
+}
+
+#[derive(Deserialize)]
+struct MoveRequest {
+	/// `null` puts the place back under its real owner
+	group: Option<String>,
+}
+
+/// "Move to group" from the right-click menu: lands at the end of that group
+#[post("/api/places/{key}/group")]
+async fn move_place(key: UrlPath<String>, request: Json<MoveRequest>, hub: HubData) -> impl Responder {
+	{
+		let mut store = hub.store();
+
+		let last = request.group.as_ref().map(|group| {
+			store
+				.places
+				.values()
+				.filter(|place| place.group.as_ref() == Some(group))
+				.filter_map(|place| place.order)
+				.max()
+				.map_or(0, |max| max + 1)
+		});
+
+		let Some(place) = store.places.get_mut(key.as_str()) else {
+			return error("Unknown place");
+		};
+
+		place.group.clone_from(&request.group);
+		place.order = last;
+	}
+
+	hub.save();
+	hub.bump();
+	ok()
+}
+
+#[derive(Deserialize)]
+struct GroupRequest {
+	name: String,
+}
+
+#[post("/api/groups")]
+async fn create_group(request: Json<GroupRequest>, hub: HubData) -> impl Responder {
+	let name = request.name.trim().to_owned();
+
+	if name.is_empty() {
+		return error("Give the group a name");
+	}
+
+	let id = format!("custom:{}", uuid::Uuid::new_v4().simple());
+
+	{
+		let mut store = hub.store();
+		store.groups.push(super::store::CustomGroup { id: id.clone(), name });
+
+		// New groups show up first
+		store.group_order.insert(0, id.clone());
+	}
+
+	hub.save();
+	hub.bump();
+	HttpResponse::Ok().json(json!({ "ok": true, "id": id }))
+}
+
+#[post("/api/groups/{id}")]
+async fn rename_group(id: UrlPath<String>, request: Json<GroupRequest>, hub: HubData) -> impl Responder {
+	let name = request.name.trim().to_owned();
+
+	if name.is_empty() {
+		return error("Give the group a name");
+	}
+
+	{
+		let mut store = hub.store();
+
+		let Some(group) = store.groups.iter_mut().find(|g| g.id == *id) else {
+			return error("Unknown group");
+		};
+
+		group.name = name;
+	}
+
+	hub.save();
+	hub.bump();
+	ok()
+}
+
+/// Deletes a custom group; its places go back under their real owner
+#[delete("/api/groups/{id}")]
+async fn delete_group(id: UrlPath<String>, hub: HubData) -> impl Responder {
+	{
+		let mut store = hub.store();
+		let id = id.into_inner();
+
+		store.groups.retain(|g| g.id != id);
+		store.group_order.retain(|g| *g != id);
+
+		for place in store.places.values_mut() {
+			if place.group.as_deref() == Some(id.as_str()) {
+				place.group = None;
+				place.order = None;
+			}
+		}
+	}
+
+	hub.save();
+	hub.bump();
+	ok()
+}
+
+#[derive(Deserialize)]
+struct GroupOrderRequest {
+	order: Vec<String>,
+}
+
+#[post("/api/groups/order")]
+async fn order_groups(request: Json<GroupOrderRequest>, hub: HubData) -> impl Responder {
+	hub.store().group_order.clone_from(&request.order);
+	hub.save();
+	hub.bump();
+	ok()
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PlaceOptions {
@@ -1292,6 +1462,14 @@ pub fn run(hub: Arc<Hub>) -> Result<()> {
 				.service(refresh)
 				.service(add_place)
 				.service(remove_place)
+				.service(restore_place)
+				.service(forget_removed)
+				.service(arrange_places)
+				.service(order_groups)
+				.service(create_group)
+				.service(rename_group)
+				.service(delete_group)
+				.service(move_place)
 				.service(map_place)
 				.service(unmap_place)
 				.service(dismiss)

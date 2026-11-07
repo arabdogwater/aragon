@@ -9,7 +9,7 @@ use serde_json::Value;
 use std::{
 	collections::{BTreeMap, HashMap},
 	fs,
-	path::PathBuf,
+	path::{Path, PathBuf},
 };
 
 use super::roblox::{KeyInfo, UniverseInfo, UserInfo};
@@ -29,6 +29,27 @@ pub struct HubStore {
 	/// Global overrides of the Studio plugin settings (setting -> value)
 	pub plugin_settings: BTreeMap<String, Value>,
 	pub prefs: Prefs,
+	/// Places removed from the dashboard. Nothing brings them back on its own (Studio opening them, the
+	/// account refresh, the project scan); only "Add back" or adding the place by ID does
+	pub removed: BTreeMap<String, RemovedPlace>,
+	/// Groups the user made on the Places page
+	pub groups: Vec<CustomGroup>,
+	/// Order of the groups on the Places page (owner keys and custom group ids); unlisted ones follow
+	pub group_order: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RemovedPlace {
+	pub record: PlaceRecord,
+	pub removed_at: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CustomGroup {
+	pub id: String,
+	pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,6 +154,12 @@ pub struct PlaceRecord {
 	pub first_seen: i64,
 	pub last_connected: Option<i64>,
 	pub stats: PlaceStats,
+
+	/// Group on the Places page when the user moved it (an owner key or a custom group id); the real owner
+	/// still shows on the place page
+	pub group: Option<String>,
+	/// Position inside its group once the user dragged it
+	pub order: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -275,7 +302,37 @@ fn store_path() -> Result<PathBuf> {
 	Ok(util::get_aragon_dir()?.join("hub.json"))
 }
 
+/// Folder identity for "two places can't share a folder": the workspace (project file's folder), cleaned
+/// and compared case-insensitively like Windows does
+pub fn folder_key(project: &Path) -> String {
+	let is_project_file = project
+		.file_name()
+		.is_some_and(|name| name.to_string_lossy().to_lowercase().ends_with(".json"));
+
+	let folder = if is_project_file {
+		project.parent().unwrap_or(project)
+	} else {
+		project
+	};
+
+	path_clean::clean(folder)
+		.to_string_lossy()
+		.replace('\\', "/")
+		.trim_end_matches('/')
+		.to_lowercase()
+}
+
 impl HubStore {
+	/// The place (other than `except`) whose project lives in the same folder as `project`
+	pub fn folder_owner(&self, project: &Path, except: &str) -> Option<String> {
+		let wanted = folder_key(project);
+
+		self.places
+			.values()
+			.find(|place| place.key != except && place.project.as_deref().is_some_and(|p| folder_key(p) == wanted))
+			.map(|place| place.key.clone())
+	}
+
 	pub fn load() -> Self {
 		let load = || -> Result<Self> {
 			let path = store_path()?;
@@ -310,5 +367,39 @@ impl HubStore {
 
 	pub fn projects_root(&self) -> PathBuf {
 		self.projects_root.clone().unwrap_or_else(default_projects_root)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn place(key: &str, project: Option<&str>) -> PlaceRecord {
+		PlaceRecord {
+			key: key.to_owned(),
+			project: project.map(PathBuf::from),
+			..Default::default()
+		}
+	}
+
+	#[test]
+	fn folder_identity() {
+		assert_eq!(
+			folder_key(Path::new(r"C:\Games\Cat Shot\default.project.json")),
+			folder_key(Path::new(r"c:\games\cat shot\"))
+		);
+		// A folder that looks like it has an extension is still a folder
+		assert_eq!(folder_key(Path::new(r"C:\Games\Shot v1.2")), "c:/games/shot v1.2");
+	}
+
+	#[test]
+	fn one_folder_per_place() {
+		let mut store = HubStore::default();
+		store.places.insert("1".into(), place("1", Some(r"C:\Games\Old\default.project.json")));
+		store.places.insert("2".into(), place("2", None));
+
+		assert_eq!(store.folder_owner(Path::new(r"C:\games\old"), "2").as_deref(), Some("1"));
+		assert_eq!(store.folder_owner(Path::new(r"C:\Games\Old"), "1"), None);
+		assert_eq!(store.folder_owner(Path::new(r"C:\Games\Other"), "2"), None);
 	}
 }

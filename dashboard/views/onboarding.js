@@ -3,6 +3,45 @@ import { api, post, go, useAction, toast } from "../lib.js";
 import { Button, Switch, Thumb, Copyable, Icon } from "../ui.js";
 import { burst } from "../motion.js";
 
+/// Same rule as the hub: a folder is identified by its path, case-insensitively, slashes normalized
+function folderKey(path) {
+	let key = String(path || "")
+		.trim()
+		.replace(/\\/g, "/")
+		.replace(/\/+$/, "")
+		.toLowerCase();
+
+	if (key.endsWith(".json")) key = key.slice(0, key.lastIndexOf("/"));
+	return key;
+}
+
+function simplify(name) {
+	return String(name || "")
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, " ")
+		.trim();
+}
+
+/// Places whose folder could be carried over, most likely first (same name, same owner, worked on lately)
+function carryCandidates(state, place) {
+	const name = simplify(place.name);
+
+	return state.places
+		.filter((p) => p.project && p.key !== place.key)
+		.map((p) => {
+			const other = simplify(p.name);
+			let score = p.score || 0;
+
+			if (name && other === name) score += 1e6;
+			else if (name && other && (other.includes(name) || name.includes(other))) score += 1e5;
+			if (place.ownerKey && p.ownerKey === place.ownerKey) score += 1e4;
+
+			return { place: p, score };
+		})
+		.sort((a, b) => b.score - a.score)
+		.map((entry) => entry.place);
+}
+
 /// Shown when Studio opens a place that has no project folder yet (or from "Map folder")
 export function Onboarding({ state, placeKey, onMapping, onClose }) {
 	const place = state.places.find((p) => p.key === placeKey);
@@ -18,6 +57,8 @@ export function Onboarding({ state, placeKey, onMapping, onClose }) {
 	const [error, setError] = useState(null);
 	const [mapping, setMapping] = useState(false);
 	const [done, setDone] = useState(null);
+	const [removePrevious, setRemovePrevious] = useState(true);
+	const [showAll, setShowAll] = useState(false);
 
 	useEffect(() => {
 		api("/api/templates").then(setTemplates, () => {});
@@ -39,6 +80,18 @@ export function Onboarding({ state, placeKey, onMapping, onClose }) {
 	if (!place) return null;
 
 	const live = state.sessions.some((s) => s.placeKey === place.key);
+
+	// Carrying a folder over from another place (a remade game): the folder keeps its files, that place lets go
+	const candidates = carryCandidates(state, place);
+	const owner = path.trim() ? state.places.find((p) => p.project && p.key !== place.key && folderKey(p.workspace) === folderKey(path)) : null;
+
+	const carryOver = (from) => {
+		setTouched(true);
+		setPath(from.workspace);
+		// The folder's code is what's being kept: files win, Studio doesn't overwrite them
+		setMode("fresh");
+		setError(null);
+	};
 
 	const pick = async () => {
 		const result = await run("pick", () => post("/api/pick-folder", { start: path || state.projectsRoot }));
@@ -66,6 +119,8 @@ export function Onboarding({ state, placeKey, onMapping, onClose }) {
 				path,
 				template,
 				importFromStudio: mode === "import",
+				transfer: !!owner,
+				removePrevious: !!owner && removePrevious,
 				...options,
 			});
 		} catch (err) {
@@ -75,7 +130,7 @@ export function Onboarding({ state, placeKey, onMapping, onClose }) {
 		}
 
 		setMapping(false);
-		setDone({ path, live });
+		setDone({ path, live, from: owner ? owner.name : null });
 
 		const rect = submitter ? submitter.getBoundingClientRect() : null;
 		burst(rect ? rect.left + rect.width / 2 : innerWidth / 2, rect ? rect.top : innerHeight / 2);
@@ -106,7 +161,9 @@ export function Onboarding({ state, placeKey, onMapping, onClose }) {
 			? html`<div class="onboard-success">
 					<img class="pop" src="assets/celebrate.webp" alt="" />
 					<h2>Much folder. Very sync.</h2>
-					<p>${place.name} now lives in <span class="mono">${done.path}</span>${done.live ? ". Studio is connecting right now." : "."}</p>
+					<p>
+						${place.name} now lives in <span class="mono">${done.path}</span>${done.from ? `, carried over from ${done.from}` : ""}${done.live ? ". Studio is connecting right now." : "."}
+					</p>
 				</div>`
 			: html`<form class="onboard-grid" onSubmit=${submit}>
 			<aside class="onboard-side">
@@ -153,6 +210,44 @@ export function Onboarding({ state, placeKey, onMapping, onClose }) {
 					</div>
 					<small>Grouped by owner automatically. An existing project in this folder is reused as is.</small>
 				</label>
+
+				${owner
+					? html`<div class="carry-warning">
+							<${Thumb} src=${owner.iconUrl} />
+							<div>
+								<b>This folder belongs to ${owner.name}</b>
+								<p>
+									Carrying it over moves the folder and its code to ${place.name || "this place"}. ${owner.name} stops syncing and needs a new
+									setup. Two places never share a folder.
+								</p>
+								<label class="toggle">
+									<${Switch} label="Also remove it from the dashboard" checked=${removePrevious} onChange=${setRemovePrevious} />
+									Also remove ${owner.name} from the dashboard
+								</label>
+							</div>
+						</div>`
+					: candidates.length
+						? html`<div class="field">
+								<span>Remade this game? Carry over a folder</span>
+								<div class="carry-list">
+									${(showAll ? candidates : candidates.slice(0, 3)).map(
+										(candidate) => html`<button type="button" class="carry-item" key=${candidate.key} onClick=${() => carryOver(candidate)} title=${candidate.workspace}>
+											<${Thumb} src=${candidate.iconUrl} />
+											<span>
+												<b>${candidate.name || "Untitled place"}</b>
+												<small class="mono">${candidate.workspace}</small>
+											</span>
+											<${Icon} name="import" />
+										</button>`,
+									)}
+								</div>
+								${candidates.length > 3 && !showAll
+									? html`<button type="button" class="btn ghost sm" style="justify-self:start" onClick=${() => setShowAll(true)}>
+											Show all ${candidates.length} places with a folder
+										</button>`
+									: null}
+							</div>`
+						: null}
 
 				<div class="field">
 					<span>Starting point</span>
@@ -214,7 +309,7 @@ export function Onboarding({ state, placeKey, onMapping, onClose }) {
 					<span class="muted">Esc to do this later</span>
 					<${Button} className="ghost" onClick=${dismiss}>Later<//>
 					<${Button} className="primary" type="submit" busy=${mapping || busy === "key"} disabled=${!path.trim()}>
-						${place.project ? "Save folder" : live ? "Create & sync" : "Create folder"}
+						${owner ? (live ? "Carry over & sync" : "Carry over") : place.project ? "Save folder" : live ? "Create & sync" : "Create folder"}
 					<//>
 				</div>
 			</div>

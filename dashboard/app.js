@@ -1,6 +1,6 @@
 import { html, render, useEffect, useState, useRef, useLayoutEffect } from "./vendor/preact-htm.js";
 import { useHub, useRoute, go, Toasts, setPendingLine } from "./lib.js";
-import { Icon } from "./ui.js";
+import { Icon, ContextMenu } from "./ui.js";
 import { startBackground } from "./bg.js";
 import { Home } from "./views/home.js";
 import { Place } from "./views/place.js";
@@ -171,6 +171,7 @@ function App() {
 		${state && state.whatsNew && state.prefs.welcomed && !onboardingKey ? html`<${WhatsNew} key=${state.whatsNew.version} state=${state} />` : null}
 		${state ? html`<${UpdateCard} state=${state} />` : null}
 		${state ? html`<${CommandPalette} state=${state} />` : null}
+		<${ContextMenu} />
 		<${Toasts} />
 	</div>`;
 }

@@ -25,7 +25,7 @@ use std::{
 
 use self::{
 	roblox::{Roblox, ThumbKind, UniverseInfo},
-	store::{now, place_key, sanitize, Account, HubStore, OwnerRecord, PlaceRecord, PlaceSource},
+	store::{now, place_key, sanitize, Account, HubStore, OwnerRecord, PlaceRecord, PlaceSource, RemovedPlace},
 };
 use crate::{
 	config::Config,
@@ -146,6 +146,10 @@ pub struct HelloResponse {
 pub struct MapRequest {
 	/// Workspace folder, the project file is created/resolved inside
 	pub path: PathBuf,
+	/// The folder belongs to another place: move it here (that place needs a new setup)
+	pub transfer: bool,
+	/// With `transfer`: also remove the old place from the dashboard
+	pub remove_previous: bool,
 	pub template: Option<String>,
 	pub import_from_studio: bool,
 	pub git: Option<bool>,
@@ -358,6 +362,43 @@ impl Hub {
 
 	pub fn hello(self: &Arc<Self>, request: HelloRequest) -> HelloResponse {
 		let key = place_key(request.place_id, &request.place_name);
+
+		// Removed from the dashboard: stays removed. Studio keeps a quiet session (so the dashboard can tell it
+		// apart from a new place) and shows why nothing syncs; it never recreates the place
+		if self.store().removed.contains_key(&key) {
+			let message = String::from(
+				"This place was removed from the Aragon dashboard, so it doesn't sync. Add it back in Aragon \
+				(Settings, Removed places) to sync it again.",
+			);
+
+			let session = StudioSession {
+				client_id: request.client_id,
+				place_key: key.clone(),
+				place_id: request.place_id,
+				game_id: request.game_id,
+				place_name: request.place_name.clone(),
+				studio_user_id: request.studio_user_id,
+				plugin_version: request.plugin_version.clone(),
+				state: SessionState::Paused,
+				message: Some(message.clone()),
+				connected_at: now(),
+				last_seen: Instant::now(),
+			};
+
+			lock!(self.sessions).insert(request.client_id, session);
+			lock!(self.controls).entry(request.client_id).or_default();
+
+			return HelloResponse {
+				state: SessionState::Paused,
+				base: format!("/p/{key}"),
+				place_key: key,
+				message: Some(message),
+				project_name: None,
+				settings: BTreeMap::new(),
+				initial_sync_priority: None,
+				hub_version: env!("CARGO_PKG_VERSION").to_owned(),
+			};
+		}
 
 		let is_new = {
 			let mut store = self.store();
@@ -929,6 +970,12 @@ impl Hub {
 		};
 
 		if project_path.exists() {
+			// Two places never share a folder
+			if let Some(owner) = self.store().folder_owner(&project_path, key) {
+				debug!("Not auto-mapping {key}: {} belongs to {owner}", project_path.display());
+				return;
+			}
+
 			info!("Auto-mapped place {key} to existing project {}", project_path.display());
 
 			if let Some(place) = self.store().places.get_mut(key) {
@@ -986,6 +1033,10 @@ impl Hub {
 			for id in place_ids.iter().filter_map(Value::as_u64) {
 				let key = id.to_string();
 
+				if store.removed.contains_key(&key) || store.folder_owner(&path, &key).is_some() {
+					continue;
+				}
+
 				let place = store
 					.places
 					.entry(key.clone())
@@ -1010,9 +1061,29 @@ impl Hub {
 			request.path.clone()
 		};
 
+		// Two places never share a folder: taking one that belongs to another place is a "carry over"
+		let previous = self.store().folder_owner(&workspace_dir, key);
+
+		if let Some(previous) = &previous {
+			if !request.transfer {
+				let name = self
+					.store()
+					.places
+					.get(previous)
+					.map(|p| p.name.clone())
+					.unwrap_or_default();
+				bail!("This folder belongs to {name}. Carry it over to move it to this place");
+			}
+		}
+
 		fs::create_dir_all(&workspace_dir).context("Failed to create the project folder")?;
 
 		let mut project_path = project::resolve(workspace_dir.clone())?;
+
+		if let Some(previous) = &previous {
+			self.release_folder(previous, request.remove_previous);
+			self.retarget_project(&project_path, key);
+		}
 
 		if !project_path.exists() {
 			let config = Config::new().clone();
@@ -1075,6 +1146,86 @@ impl Hub {
 		Ok(project_path)
 	}
 
+	/// The place that owned a carried-over folder lets go of it: it needs a new setup (and is removed from
+	/// the dashboard when the user asked for that)
+	fn release_folder(&self, key: &str, remove: bool) {
+		info!("Place {key} gave its folder to another place");
+
+		if remove {
+			self.remove_place(key);
+			return;
+		}
+
+		self.unload_core(key, "Its folder moved to another place");
+
+		if let Some(place) = self.store().places.get_mut(key) {
+			place.project = None;
+			place.first_sync = None;
+		}
+
+		self.reconnect(key, "Its folder moved to another place");
+	}
+
+	/// A carried-over project file may pin the old place (`placeIds`, `gameId`): point it at the new one, or
+	/// Studio would refuse to sync it and the next scan would hand the folder back to the old place
+	fn retarget_project(&self, project_path: &Path, key: &str) {
+		let (place_id, universe_id) = match self.store().places.get(key) {
+			Some(place) => (place.place_id, place.universe_id),
+			None => return,
+		};
+
+		let Ok(text) = fs::read_to_string(project_path) else {
+			return;
+		};
+
+		let Ok(mut json) = serde_json::from_str::<Value>(&text) else {
+			return;
+		};
+
+		let Some(object) = json.as_object_mut() else {
+			return;
+		};
+
+		let mut changed = false;
+
+		for field in ["placeIds", "servePlaceIds"] {
+			if object.contains_key(field) {
+				let ids: Vec<u64> = if place_id > 0 { vec![place_id] } else { vec![] };
+				object.insert(field.into(), json!(ids));
+				changed = true;
+			}
+		}
+
+		if object.contains_key("gameId") {
+			match universe_id {
+				Some(universe) => {
+					object.insert("gameId".into(), json!(universe));
+				}
+				None => {
+					object.remove("gameId");
+				}
+			}
+
+			changed = true;
+		}
+
+		if !changed {
+			return;
+		}
+
+		let mut out = Vec::new();
+		let formatter = serde_json::ser::PrettyFormatter::with_indent(b"\t");
+		let mut serializer = serde_json::Serializer::with_formatter(&mut out, formatter);
+
+		if serde::Serialize::serialize(&json, &mut serializer).is_ok() {
+			out.push(b'\n');
+
+			if let Err(err) = fs::write(project_path, out) {
+				warn!("Couldn't point {} at the new place: {err}", project_path.display());
+			}
+		}
+	}
+
 	pub fn unmap_place(&self, key: &str) {
 		if let Some(place) = self.store().places.get_mut(key) {
 			place.project = None;
@@ -1087,6 +1238,12 @@ impl Hub {
 
 	pub fn add_place(self: &Arc<Self>, place_id: u64) -> String {
 		let key = place_id.to_string();
+
+		// Adding a removed place by ID brings it back
+		if self.store().removed.contains_key(&key) {
+			self.restore_place(&key);
+			return key;
+		}
 
 		self.store()
 			.places
@@ -1101,9 +1258,54 @@ impl Hub {
 		key
 	}
 
+	/// Removes a place from the dashboard for good: it no longer syncs and nothing re-adds it on its own.
+	/// It also lets go of its folder (another place may take it), "Add back" restores the rest
 	pub fn remove_place(&self, key: &str) {
 		self.unload_core(key, "Place was removed from the dashboard");
-		self.store().places.remove(key);
+
+		{
+			let mut store = self.store();
+
+			if let Some(mut record) = store.places.remove(key) {
+				record.project = None;
+				record.first_sync = None;
+				store.removed.insert(
+					key.to_owned(),
+					RemovedPlace {
+						record,
+						removed_at: now(),
+					},
+				);
+			}
+		}
+
+		// Studio has it open: let it hear "removed" right away
+		self.reconnect(key, "Place was removed from the dashboard");
+		lock!(self.dismissed).remove(key);
+		self.save();
+		self.bump();
+	}
+
+	/// "Add back": the place returns as it was (analytics included), without a folder: it gets set up again
+	pub fn restore_place(&self, key: &str) {
+		{
+			let mut store = self.store();
+
+			let Some(removed) = store.removed.remove(key) else {
+				return;
+			};
+
+			store.places.insert(key.to_owned(), removed.record);
+		}
+
+		self.reconnect(key, "Place was added back to the dashboard");
+		self.save();
+		self.bump();
+	}
+
+	/// Forgets a removed place entirely (it'll be a new place if Studio opens it again)
+	pub fn forget_removed(&self, key: &str) {
+		self.store().removed.remove(key);
 		self.save();
 		self.bump();
 	}
@@ -1451,6 +1653,10 @@ impl Hub {
 			let key = place.id.to_string();
 			let is_root = universe.root_place_id == place.id;
 
+			if store.removed.contains_key(&key) {
+				continue;
+			}
+
 			let record = store
 				.places
 				.entry(key.clone())
@@ -1647,6 +1853,8 @@ impl Hub {
 					"syncedClients": synced.get(&place.key).copied().unwrap_or(0),
 					"resolving": place.place_id > 0 && place.universe_id.is_none(),
 					"score": place.stats.score(),
+					"group": place.group,
+					"order": place.order,
 					"problems": self.journal.problems(&place.key),
 					"lastActivity": self.journal.last_activity(&place.key),
 					"outputErrors": self.journal.recent_errors(&place.key),
@@ -1664,6 +1872,12 @@ impl Hub {
 					},
 				})
 			})
+			.collect();
+
+		// Sessions of removed places stay out of the dashboard
+		let sessions: Vec<StudioSession> = sessions
+			.into_iter()
+			.filter(|session| !store.removed.contains_key(&session.place_key))
 			.collect();
 
 		let onboarding: Vec<&String> = sessions
@@ -1723,6 +1937,15 @@ impl Hub {
 			"projectsRoot": store.projects_root(),
 			"owners": store.owners.iter().map(|(key, owner)| (key.clone(), json!(owner))).collect::<serde_json::Map<_, _>>(),
 			"places": places,
+			"groups": store.groups,
+			"groupOrder": store.group_order,
+			"removed": store.removed.iter().map(|(key, removed)| json!({
+				"key": key,
+				"name": removed.record.name,
+				"placeId": removed.record.place_id,
+				"iconUrl": removed.record.icon_url,
+				"removedAt": removed.removed_at,
+			})).collect::<Vec<_>>(),
 			"sessions": sessions,
 			"onboarding": onboarding,
 			"openRequest": lock!(self.open_request).clone(),

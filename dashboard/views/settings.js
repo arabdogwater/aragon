@@ -1,6 +1,6 @@
 import { html, useState, useEffect } from "../vendor/preact-htm.js";
 import { api, post, ago, useAction, toast } from "../lib.js";
-import { Button, Switch, Icon } from "../ui.js";
+import { Button, Switch, Icon, Thumb } from "../ui.js";
 
 /// One control for any plugin setting kind (bool / number / enum)
 export function SettingControl({ setting, value, onChange }) {
@@ -284,6 +284,54 @@ function Updates({ state }) {
 	</section>`;
 }
 
+function Removed({ state }) {
+	const [busy, run] = useAction();
+	const removed = [...state.removed].sort((a, b) => b.removedAt - a.removedAt);
+
+	return html`<section class="settings-section" id="removed">
+		<header>
+			<h2>Removed places</h2>
+			<p>
+				Places you removed from the dashboard. They don't sync and nothing adds them back on its own: not Studio opening
+				them, not a Roblox refresh. Add one back to sync it again (it gets a new setup), or forget it for good.
+			</p>
+		</header>
+		<div class="panel">
+			${removed.length
+				? removed.map(
+						(place) => html`<div class="setting" key=${place.key}>
+							<div class="toolbar" style="flex-wrap:nowrap;gap:12px">
+								<${Thumb} src=${place.iconUrl} className="removed-thumb" />
+								<div>
+									<b>${place.name || "Untitled place"}</b>
+									<p>${place.placeId ? `place ${place.placeId} · ` : ""}removed ${ago(place.removedAt)}</p>
+								</div>
+							</div>
+							<div class="control">
+								<${Button}
+									icon="refresh"
+									busy=${busy === "restore" + place.key}
+									onClick=${() => run("restore" + place.key, () => post(`/api/places/${place.key}/restore`), `${place.name || "Place"} is back`)}
+								>
+									Add back
+								<//>
+								<${Button}
+									className="ghost"
+									busy=${busy === "forget" + place.key}
+									onClick=${() =>
+										confirm(`Forget ${place.name || "this place"} completely? If Studio opens it again it shows up as a new place.`) &&
+										run("forget" + place.key, () => api(`/api/removed/${place.key}`, { method: "DELETE" }), "Forgotten")}
+								>
+									Forget
+								<//>
+							</div>
+						</div>`,
+					)
+				: html`<div class="setting"><div><b>Nothing removed</b><p>Right-click a place → Remove from dashboard.</p></div></div>`}
+		</div>
+	</section>`;
+}
+
 function Editors({ state }) {
 	const [busy, run] = useAction();
 	const editors = state.editors;
@@ -403,6 +451,7 @@ export function Settings({ state, params }) {
 				<a href="#/settings/plugin">Studio plugin</a>
 				<a href="#/settings/editor">Code editor</a>
 				<a href="#/settings/updates">Updates</a>
+				<a href="#/settings/removed">Removed places${state.removed.length ? ` (${state.removed.length})` : ""}</a>
 				<a href="#/settings/engine">Sync engine</a>
 				<a href="#/settings/about">About</a>
 			</nav>
@@ -412,6 +461,7 @@ export function Settings({ state, params }) {
 				<${Plugin} state=${state} />
 				<${Editors} state=${state} />
 				<${Updates} state=${state} />
+				<${Removed} state=${state} />
 				<${Engine} />
 				<section class="settings-section" id="about">
 					<header>
